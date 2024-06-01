@@ -1656,6 +1656,7 @@ void BotGraph::populateNodes () {
    m_rescuePoints.clear ();
    m_sniperPoints.clear ();
    m_visitedGoals.clear ();
+   m_humanCampPoints.clear ();
 
    for (const auto &path : m_paths) {
       if (path.flags & NodeFlag::TerroristOnly) {
@@ -1675,6 +1676,9 @@ void BotGraph::populateNodes () {
       }
       else if (path.flags & NodeFlag::Rescue) {
          m_rescuePoints.push (path.number);
+      }
+      else if (path.flags & NodeFlag::HumanCamp) {
+         m_humanCampPoints.push (path.number);
       }
    }
 }
@@ -2340,7 +2344,7 @@ void BotGraph::frame () {
                jumpPoint = true;
             }
          }
-         flags.assignf ("%s%s%s%s%s%s%s%s%s%s%s%s",
+         flags.assignf ("%s%s%s%s%s%s%s%s%s%s%s%s%s",
             (p.flags & NodeFlag::Lift) ? " LIFT" : "",
             (p.flags & NodeFlag::Crouch) ? " CROUCH" : "",
             (p.flags & NodeFlag::Camp) ? " CAMP" : "",
@@ -2351,7 +2355,9 @@ void BotGraph::frame () {
             (p.flags & NodeFlag::Ladder) ? " LADDER" : "",
             (p.flags & NodeFlag::Rescue) ? " RESCUE" : "",
             (p.flags & NodeFlag::DoubleJump) ? " JUMPHELP" : "",
-            (p.flags & NodeFlag::NoHostage) ? " NOHOSTAGE" : "", jumpPoint ? " JUMP" : "");
+            (p.flags & NodeFlag::NoHostage) ? " NOHOSTAGE" : "", 
+            (p.flags & NodeFlag::HumanCamp) ? " HUMANCAMP" : "",
+            jumpPoint ? " JUMP" : "");
 
          if (flags.empty ()) {
             flags.assign ("(none)");
@@ -2777,6 +2783,7 @@ BotGraph::BotGraph () {
    m_campPoints.clear ();
    m_rescuePoints.clear ();
    m_sniperPoints.clear ();
+   m_humanCampPoints.clear ();
 
    m_editFlags = 0;
 

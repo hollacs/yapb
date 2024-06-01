@@ -9,6 +9,8 @@
 
 ConVar cv_has_team_semiclip ("has_team_semiclip", "0", "When enabled, bots will not try to avoid teammates on their way. Assuming some of the semiclip plugins are in use.");
 
+extern ConVar cv_zombie_mode;
+
 int Bot::findBestGoal () {
    if (m_isCreature) {
       if (!graph.m_terrorPoints.empty ()) {
@@ -253,6 +255,10 @@ int Bot::findBestGoalWhenBombAction () {
 
 int Bot::findGoalPost (int tactic, IntArray *defensive, IntArray *offensive) {
    int goalChoices[4] = { kInvalidNodeIndex, kInvalidNodeIndex, kInvalidNodeIndex, kInvalidNodeIndex };
+
+   if (cv_zombie_mode && m_team == Team::CT) {
+      return m_chosenGoalIndex = graph.m_humanCampPoints.random ();
+   }
 
    if (tactic == GoalTactic::Defensive && !(*defensive).empty ()) { // careful goal
       postprocessGoals (*defensive, goalChoices);
@@ -2404,7 +2410,7 @@ bool Bot::advanceMovement () {
                   break;
                }
 
-               if (m_baseAgressionLevel < kills && hasPrimaryWeapon ()) {
+               if (m_baseAgressionLevel < kills && hasPrimaryWeapon () && !cv_zombie_mode) {
                   startTask (Task::Camp, TaskPri::Camp, kInvalidNodeIndex, game.time () + rg (static_cast <float> (m_difficulty / 2), static_cast <float> (m_difficulty)) * 5.0f, true);
                   startTask (Task::MoveToPosition, TaskPri::MoveToPosition, findDefendNode (graph[nextIndex].origin), game.time () + rg (3.0f, 10.0f), true);
                }

@@ -1651,6 +1651,18 @@ int BotControl::menuGraphFlag (int item) {
       break;
 
    case 9:
+      showMenu (Menu::NodeFlag2);
+      break;
+   }
+   return BotCommandResult::Handled;
+}
+
+int BotControl::menuGraphFlag2 (int item) {
+   closeMenu (); // reset menu display
+   int nearest = graph.getEditorNearest ();
+
+   switch (item) {
+   case 1:
       // if the node doesn't have a camp flag, set it and open the camp directions selection menu
       if (!(graph[nearest].flags & NodeFlag::Camp)) {
          graph.toggleFlags (NodeFlag::Camp);
@@ -1663,7 +1675,15 @@ int BotControl::menuGraphFlag (int item) {
          showMenu (Menu::NodeFlag);
          break;
       }
+   case 2:
+      graph.toggleFlags (NodeFlag::HumanCamp);
+      showMenu (Menu::NodeFlag);
+      break;
+   case 3:
+      showMenu (Menu::NodeFlag);
+      break;
    }
+
    return BotCommandResult::Handled;
 }
 
@@ -2496,9 +2516,19 @@ void BotControl::createMenus () {
       "6. Map Goal\n"
       "7. Rescue Zone\n"
       "8. Crouch Down\n"
-      "9. Camp Point\n\n"
+      "9. Next...\n\n"
       "0. Exit",
       &BotControl::menuGraphFlag);
+
+   // set waypoint flag menu
+   m_menus.emplace (
+      Menu::NodeFlag2, keys (3),
+      "\\yToggle Waypoint Flags (Page 2)\\w\n\n"
+      "1. Camp Point\n"
+      "2. Human Camp Point\n\n"
+      "3. Previous...\n\n"
+      "0. Exit",
+      &BotControl::menuGraphFlag2);
 
    // set camp directions menu
    m_menus.emplace (

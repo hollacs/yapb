@@ -17,6 +17,8 @@ ConVar cv_use_engine_pvs_check ("use_engine_pvs_check", "0", "Use engine to chec
 ConVar mp_friendlyfire ("mp_friendlyfire", nullptr, Var::GameRef);
 ConVar sv_gravity ("sv_gravity", nullptr, Var::GameRef);
 
+extern ConVar cv_zombie_mode;
+
 int Bot::numFriendsNear (const Vector &origin, const float radius) {
    if (game.is (GameFlags::FreeForAll)) {
       return 0; // no friends on free for all mode
@@ -1420,6 +1422,11 @@ void Bot::attackMovement () {
             m_strafeSpeed = 0.0f;
             m_strafeSetTime = strafeUpdateTime ();
          }
+      }
+
+      /* holla */
+      if (cv_zombie_mode && m_team == Team::Terrorist) {
+         m_strafeSpeed = 0.0f;
       }
 
       // we're setting strafe speed regardless of move angles, so not resetting forward move here cause bots to behave strange

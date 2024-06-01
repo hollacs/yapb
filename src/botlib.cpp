@@ -37,8 +37,10 @@ ConVar cv_attack_monsters ("attack_monsters", "0", "Allows or disallows bots to 
 ConVar cv_pickup_custom_items ("pickup_custom_items", "0", "Allows or disallows bots to pickup custom items.");
 ConVar cv_pickup_ammo_and_kits ("pickup_ammo_and_kits", "0", "Allows bots pickup mod items like ammo, health kits and suits.");
 ConVar cv_pickup_best ("pickup_best", "1", "Allows or disallows bots to pickup best weapons.");
-ConVar cv_ignore_objectives ("ignore_objectives", "0", "Allows or disallows bots to do map objectives, i.e. plant/defuse bombs, and save hostages.");
+ConVar cv_ignore_objectives ("ignore_objectives", "0", "Allows or disallows bots to do map objectives, i.e. plant/defuse bombs, and saves hostages.");
 ConVar cv_smoke_grenade_checks ("smoke_grenade_checks", "2", "Affect bot's vision by smoke clouds.", true, 0.0f, 2.0f);
+
+ConVar cv_zombie_mode ("zombie_mode", "0", "Enable zombie mode.");
 
 // game console variables
 ConVar mp_c4timer ("mp_c4timer", nullptr, Var::GameRef);
@@ -324,6 +326,11 @@ void Bot::updatePickups () {
 
       // knife mode is in progress ?
       else if (cv_jasonmode) {
+         return true;
+      }
+
+      // is zombie /* holla */
+      else if (cv_zombie_mode && m_team == Team::Terrorist) {
          return true;
       }
 
@@ -1680,8 +1687,12 @@ void Bot::overrideConditions () {
          }
       }
       else {
-         if (length <= 250.0f && (m_states & Sense::SeeingEnemy) && tid == Task::MoveToPosition) {
-            clearTask (Task::MoveToPosition); // remove any move tasks
+         if (length <= 250.0f && (m_states & Sense::SeeingEnemy)) {
+            if (tid == Task::MoveToPosition) {
+               clearTask (Task::MoveToPosition); // remove any move tasks
+            }
+
+            findNextBestNode();
          }
       }
    }
@@ -2039,21 +2050,21 @@ void Bot::filterTasks () {
 
       // if half of the round is over, allow hunting
       if (getCurrentTaskId () != Task::EscapeFromBomb
-         && game.isNullEntity (m_enemy)
-         && !m_isVIP
-         && bots.getRoundMidTime () < game.time ()
-         && !m_hasHostage
-         && !m_isUsingGrenade
-         && m_currentNodeIndex != graph.getNearest (m_lastEnemyOrigin)
-         && m_personality != Personality::Careful
-         && !cv_ignore_enemies) {
+          && game.isNullEntity (m_enemy)
+          && !m_isVIP
+          && bots.getRoundMidTime () < game.time ()
+          && !m_hasHostage
+          && !m_isUsingGrenade
+          && m_currentNodeIndex != graph.getNearest (m_lastEnemyOrigin)
+          && m_personality != Personality::Careful
+          && !cv_ignore_enemies) {
 
          float desireLevel = 4096.0f - ((1.0f - tempAgression) * m_lastEnemyOrigin.distance (pev->origin));
 
          desireLevel = (100.0f * desireLevel) / 4096.0f;
          desireLevel -= retreatLevel;
 
-         if (desireLevel > 89.0f) {
+         if (desireLevel > 89.0f || (cv_zombie_mode && m_team == Team::Terrorist)) {
             desireLevel = 89.0f;
          }
          huntEnemyDesire = desireLevel;
@@ -2264,7 +2275,7 @@ bool Bot::isEnemyThreat () {
    }
 
    // if enemy is near or facing us directly
-   if (m_enemy->v.origin.distanceSq (pev->origin) < cr::sqrf (256.0f) || (!usesKnife () && isInViewCone (m_enemy->v.origin))) {
+   if (m_enemy->v.origin.distanceSq (pev->origin) < cr::sqrf (256.0f) || (((cv_zombie_mode && m_team == Team::Terrorist) /* holla */ || !usesKnife ()) && isInViewCone (m_enemy->v.origin))) {
       return true;
    }
    return false;
@@ -2322,7 +2333,7 @@ void Bot::checkRadioQueue () {
 
 
    // don't allow bot listen you if bot is busy
-   if (getCurrentTaskId () == Task::DefuseBomb || getCurrentTaskId () == Task::PlantBomb || m_hasHostage || m_hasC4) {
+   if (getCurrentTaskId () == Task::DefuseBomb || getCurrentTaskId () == Task::PlantBomb || m_hasHostage || m_hasC4 || (cv_zombie_mode && m_team == Team::Terrorist)) {
       m_radioOrder = 0;
       return;
    }

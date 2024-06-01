@@ -152,6 +152,7 @@ private:
    int menuGraphType (int item);
    int menuGraphDebug (int item);
    int menuGraphFlag (int item);
+   int menuGraphFlag2 (int item);
    int menuGraphPath (int item);
    int menuCampDirections (int item);
    int menuAutoPathDistance (int item);

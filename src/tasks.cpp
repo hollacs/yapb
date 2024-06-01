@@ -15,6 +15,8 @@ ConVar cv_camping_time_max ("camping_time_max", "45.0", "Upper bound of time unt
 
 ConVar cv_random_knife_attacks ("random_knife_attacks", "1", "Allows or disallows the ability for random knife attacks when bot is rushing and no enemy is nearby.");
 
+extern ConVar cv_zombie_mode;
+
 void Bot::normal_ () {
    m_aimFlags |= AimFlags::Nav;
 
@@ -103,7 +105,7 @@ void Bot::normal_ () {
       }
 
       // reached node is a camp node
-      if ((m_pathFlags & NodeFlag::Camp) && !game.is (GameFlags::CSDM) && cv_camping_allowed && !isKnifeMode ()) {
+      if ((m_pathFlags & NodeFlag::Camp) && !game.is (GameFlags::CSDM) && cv_camping_allowed && !isKnifeMode () && !cv_zombie_mode) {
          const bool allowedCampWeapon = hasPrimaryWeapon ()
             || hasShield ()
             || (hasSecondaryWeapon () && !hasPrimaryWeapon () && m_numFriendsLeft > game.maxClients () / 6);
@@ -227,6 +229,10 @@ void Bot::normal_ () {
                   pushChatterMessage (Chatter::DefendingBombsite); // play info about that
                }
             }
+         }
+
+         if (cv_zombie_mode && m_team == Team::CT && (m_pathFlags & NodeFlag::HumanCamp)) {
+            startTask (Task::Camp, TaskPri::Camp, kInvalidNodeIndex, game.time () + rg (120.0f, 180.0f), true);
          }
       }
    }
@@ -406,7 +412,7 @@ void Bot::huntEnemy_ () {
 void Bot::seekCover_ () {
    m_aimFlags |= AimFlags::Nav;
 
-   if (!util.isAlive (m_lastEnemy)) {
+   if (!util.isAlive (m_lastEnemy) || (cv_zombie_mode && m_team == Team::Terrorist) /* holla */) {
       completeTask ();
       m_prevGoalIndex = kInvalidNodeIndex;
    }
@@ -692,7 +698,7 @@ void Bot::camp_ () {
 }
 
 void Bot::hide_ () {
-   if (m_isCreature) {
+   if (m_isCreature || (cv_zombie_mode && m_team == Team::Terrorist) /* holla */) {
       completeTask ();
       return;
    };

@@ -23,6 +23,7 @@ CR_DECLARE_SCOPED_ENUM (NodeFlag,
    NoHostage = cr::bit (8), // only use this node if no hostage
    DoubleJump = cr::bit (9), // bot help's another bot (requster) to get somewhere (using djump)
    Narrow = cr::bit (10), // node is inside some small space (corridor or such)
+   HumanCamp = cr::bit (27), // human camp point
    Sniper = cr::bit (28), // it's a specific sniper point
    TerroristOnly = cr::bit (29), // it's a specific terrorist point
    CTOnly = cr::bit (30),  // it's a specific ct point
@@ -183,6 +184,7 @@ private:
    IntArray m_sniperPoints {};
    IntArray m_rescuePoints {};
    IntArray m_visitedGoals {};
+   IntArray m_humanCampPoints {};
 
 public:
    SmallArray <Path> m_paths {};
