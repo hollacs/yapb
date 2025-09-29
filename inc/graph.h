@@ -92,57 +92,57 @@ CR_DECLARE_SCOPED_ENUM (NotifySound,
 
 // general waypoint header information structure for podbot
 struct PODGraphHeader {
-   char header[8];
-   int32_t fileVersion;
-   int32_t pointNumber;
-   char mapName[32];
-   char author[32];
+   char header[8] {};
+   int32_t fileVersion {};
+   int32_t pointNumber {};
+   char mapName[32] {};
+   char author[32] {};
 };
 
 // defines linked nodes
 struct PathLink {
-   Vector velocity;
-   int32_t distance;
-   uint16_t flags;
-   int16_t index;
+   Vector velocity {};
+   int32_t distance {};
+   uint16_t flags {};
+   int16_t index {};
 };
 
 // define graph path structure for yapb
 struct Path {
-   int32_t number, flags;
-   Vector origin, start, end;
-   float radius, light, display;
-   PathLink links[kMaxNodeLinks];
-   PathVis vis;
+   int32_t number {}, flags {};
+   Vector origin {}, start {}, end {};
+   float radius {}, light {}, display {};
+   PathLink links[kMaxNodeLinks] {};
+   PathVis vis {};
 };
 
 // define waypoint structure for podbot (will convert on load)
 struct PODPath {
-   int32_t number, flags;
-   Vector origin;
-   float radius, csx, csy, cex, cey;
-   int16_t index[kMaxNodeLinks];
-   uint16_t conflags[kMaxNodeLinks];
-   Vector velocity[kMaxNodeLinks];
-   int32_t distance[kMaxNodeLinks];
-   PathVis vis;
+   int32_t number {}, flags {};
+   Vector origin {};
+   float radius {}, csx {}, csy {}, cex {}, cey {};
+   int16_t index[kMaxNodeLinks] {};
+   uint16_t conflags[kMaxNodeLinks] {};
+   Vector velocity[kMaxNodeLinks] {};
+   int32_t distance[kMaxNodeLinks] {};
+   PathVis vis {};
 };
 
 // general storage header information structure
 struct StorageHeader {
-   int32_t magic;
-   int32_t version;
-   int32_t options;
-   int32_t length;
-   int32_t compressed;
-   int32_t uncompressed;
+   int32_t magic {};
+   int32_t version {};
+   int32_t options {};
+   int32_t length {};
+   int32_t compressed {};
+   int32_t uncompressed {};
 };
 
 // extension header for graph information
 struct ExtenHeader {
-   char author[32]; // original author of graph
-   int32_t mapSize; // bsp size for checksumming map consistency
-   char modified[32]; // by whom modified
+   char author[32] {}; // original author of graph
+   int32_t mapSize {}; // bsp size for checksumming map consistency
+   char modified[32] {}; // by whom modified
 };
 
 // graph operation class
@@ -185,16 +185,18 @@ private:
    IntArray m_rescuePoints {};
    IntArray m_visitedGoals {};
    IntArray m_humanCampPoints {};
+   IntArray m_nodeNumbers {};
 
 public:
    SmallArray <Path> m_paths {};
    HashMap <int32_t, Array <int32_t>, EmptyHash <int32_t>> m_hashTable {};
 
-   String m_graphAuthor {};
-   String m_graphModified {};
-
-   ExtenHeader m_extenHeader {};
-   StorageHeader m_graphHeader {};
+   struct GraphInfo {
+      String author {};
+      String modified {};
+      ExtenHeader exten {};
+      StorageHeader header {};
+   } m_info {};
 
    edict_t *m_editor {};
 
@@ -218,16 +220,16 @@ public:
    bool convertOldFormat ();
    bool isConnected (int a, int b);
    bool isConnected (int index);
-   bool isNodeReacheableEx (const Vector &src, const Vector &destination, const float maxHeight);
-   bool isNodeReacheable (const Vector &src, const Vector &destination);
-   bool isNodeReacheableWithJump (const Vector &src, const Vector &destination);
-   bool checkNodes (bool teleportPlayer);
+   bool isNodeReacheableEx (const Vector &src, const Vector &destination, const float maxHeight) const;
+   bool isNodeReacheable (const Vector &src, const Vector &destination) const;
+   bool isNodeReacheableWithJump (const Vector &src, const Vector &destination) const;
+   bool checkNodes (bool teleportPlayer, bool onlyPaths = false);
    bool isVisited (int index);
-   bool isAnalyzed () const;
 
    bool saveGraphData ();
    bool loadGraphData ();
    bool canDownload ();
+   bool isAnalyzed () const;
 
    void saveOldFormat ();
    void reset ();
@@ -251,35 +253,29 @@ public:
    void startLearnJump ();
    void setVisited (int index);
    void clearVisited ();
-   void initBuckets ();
-   void addToBucket (const Vector &pos, int index);
+
    void eraseFromBucket (const Vector &pos, int index);
    void setBombOrigin (bool reset = false, const Vector &pos = nullptr);
    void unassignPath (int from, int to);
-   void convertFromPOD (Path &path, const PODPath &pod);
+   void convertFromPOD (Path &path, const PODPath &pod) const;
    void convertToPOD (const Path &path, PODPath &pod);
-   void convertCampDirection (Path &path);
+   void convertCampDirection (Path &path) const;
    void setAutoPathDistance (const float distance);
    void showStats ();
    void showFileInfo ();
-   void emitNotify (int32_t sound);
+   void emitNotify (int32_t sound) const;
    void syncCollectOnline ();
    void collectOnline ();
 
-   IntArray getNearestInRadius (float radius, const Vector &origin, int maxCount = -1);
-   const IntArray &getNodesInBucket (const Vector &pos);
+   IntArray getNearestInRadius (const float radius, const Vector &origin, int maxCount = -1);
 
 public:
-  int32_t getMaxRouteLength () const {
-     return length () / 2;
-   }
-
    StringRef getAuthor () const {
-      return m_graphAuthor;
+      return m_info.author;
    }
 
    StringRef getModifiedBy () const {
-      return m_graphModified;
+      return m_info.modified;
    }
 
    bool hasChanged () const {
@@ -344,12 +340,32 @@ public:
 
    // set exten header from binary storage
    void setExtenHeader (ExtenHeader *hdr) {
-      memcpy (&m_extenHeader, hdr, sizeof (ExtenHeader));
+      memcpy (&m_info.exten, hdr, sizeof (ExtenHeader));
    }
 
    // set graph header from binary storage
    void setGraphHeader (StorageHeader *hdr) {
-      memcpy (&m_graphHeader, hdr, sizeof (StorageHeader));
+      memcpy (&m_info.header, hdr, sizeof (StorageHeader));
+   }
+
+   // gets the node numbers
+   const IntArray &getNodeNumbers () {
+      return m_nodeNumbers;
+   }
+
+   // reinitialize buckets
+   void initBuckets () {
+      m_hashTable.clear ();
+   }
+
+   // get the bucket of nodes near position
+   const IntArray &getNodesInBucket (const Vector &pos) {
+      return m_hashTable[locateBucket (pos)];
+   }
+
+   // add a node to position bucket
+   void addToBucket (const Vector &pos, int index) {
+      m_hashTable[locateBucket (pos)].emplace (index);
    }
 
 public:

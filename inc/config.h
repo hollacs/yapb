@@ -9,7 +9,7 @@
 
 // botname structure definition
 struct BotName {
-   String name;
+   String name {};
    int usedBy = -1;
 
 public:
@@ -19,9 +19,9 @@ public:
 
 // voice config structure definition
 struct ChatterItem {
-   String name;
-   float repeat;
-   float duration;
+   String name {};
+   float repeat {};
+   float duration {};
 
 public:
    ChatterItem (StringRef name, float repeat, float duration) : name (name), repeat (repeat), duration (duration) {}
@@ -48,7 +48,7 @@ private:
    SmallArray <WeaponInfo> m_weapons {};
    SmallArray <WeaponProp> m_weaponProps {};
 
-   StringArray m_logos {};
+   IntArray m_logosIndices {};
    StringArray m_avatars {};
 
    HashMap <uint32_t, String, Hash <int32_t>> m_language {};
@@ -244,13 +244,8 @@ public:
    }
 
    // get's random logo index
-   int32_t getRandomLogoIndex () const {
-      return static_cast <int32_t> (m_logos.index (m_logos.random ()));
-   }
-
-   // get random name by index
-   StringRef getLogoName (int index) {
-      return m_logos[index];
+   int32_t getRandomLogoDecalIndex () const {
+      return static_cast <int32_t> (m_logosIndices.random ());
    }
 
    // get custom value
@@ -263,7 +258,7 @@ public:
       return "";
    }
 
-   // simple accessor to c4 model name
+   // simple accessors to c4 model name
    StringRef getBombModelName () {
       return fetchCustom ("C4ModelName");
    }

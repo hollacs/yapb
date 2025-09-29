@@ -87,7 +87,7 @@ private:
    using SendToProto = decltype (sendto);
 
 private:
-   Detour <SendToProto> m_sendToDetour { }, m_sendToDetourSys {};
+   Detour <SendToProto> m_sendToDetour {}, m_sendToDetourSys {};
 
 public:
    ServerQueryHook () = default;
@@ -105,44 +105,47 @@ public:
    }
 
 public:
-   static int32_t CR_STDCALL sendTo (int socket, const void *message, size_t length, int flags, const struct sockaddr *dest, int destLength);
+   CR_FORCE_STACK_ALIGN static int32_t CR_STDCALL sendTo (int socket, const void *message, size_t length, int flags, const struct sockaddr *dest, int destLength);
 };
 
 // used for transit calls between game dll and engine without all needed functions on bot side
-class DynamicLinkerHook : public Singleton <DynamicLinkerHook> {
+class EntityLinkHook : public Singleton <EntityLinkHook> {
 private:
-#if defined (CR_WINDOWS)
+#if defined(CR_WINDOWS)
 #  define DLSYM_FUNCTION GetProcAddress
 #  define DLCLOSE_FUNCTION FreeLibrary
+#elif defined(CR_PSVITA) // just a shim
+#  define DLSYM_FUNCTION vrtld_dlsym
+#  define DLCLOSE_FUNCTION vrtld_dlclose
 #else
 #  define DLSYM_FUNCTION dlsym
 #  define DLCLOSE_FUNCTION dlclose
 #endif
 
 private:
-   using DlsymProto = SharedLibrary::Func CR_STDCALL (SharedLibrary::Handle, const char *);
-   using DlcloseProto = int CR_STDCALL (SharedLibrary::Handle);
+   using DlsymProto = decltype (DLSYM_FUNCTION);
+   using DlcloseProto = decltype (DLCLOSE_FUNCTION);
 
 private:
    bool m_paused { false };
 
-   Detour <DlsymProto> m_dlsym;
-   Detour <DlcloseProto> m_dlclose;
-   HashMap <StringRef, SharedLibrary::Func> m_exports;
+   Detour <DlsymProto> m_dlsym {};
+   Detour <DlcloseProto> m_dlclose {};
+   HashMap <StringRef, SharedLibrary::Func> m_exports {};
 
-   SharedLibrary m_self;
+   SharedLibrary m_self {};
 
 public:
-   DynamicLinkerHook () = default;
-   ~DynamicLinkerHook () = default;
+   EntityLinkHook () = default;
+   ~EntityLinkHook () = default;
 
 public:
    void initialize ();
    bool needsBypass () const;
 
-   SharedLibrary::Func lookup (SharedLibrary::Handle module, const char *function);
+   SharedLibrary::Func lookupSymbol (SharedLibrary::Handle module, const char *function);
 
-   decltype (auto) close (SharedLibrary::Handle module) {
+   decltype (auto) freeLibrary (SharedLibrary::Handle module) {
       if (m_self.handle () == module) {
          disable ();
          return m_dlclose (module);
@@ -177,15 +180,15 @@ public:
    }
 
 public:
-   static SharedLibrary::Func CR_STDCALL lookupHandler (SharedLibrary::Handle module, const char *function) {
-      return instance ().lookup (module, function);
+   CR_FORCE_STACK_ALIGN static SharedLibrary::Func CR_STDCALL lookupHandler (SharedLibrary::Handle handle, const char *function) {
+      return instance ().lookupSymbol (handle, function);
    }
 
-   static int CR_STDCALL closeHandler (SharedLibrary::Handle module) {
-      return instance ().close (module);
+   CR_FORCE_STACK_ALIGN static int CR_STDCALL closeHandler (SharedLibrary::Handle handle) {
+      return instance ().freeLibrary (handle);
    }
 };
 
 // expose global
-CR_EXPOSE_GLOBAL_SINGLETON (DynamicLinkerHook, entlink);
+CR_EXPOSE_GLOBAL_SINGLETON (EntityLinkHook, entlink);
 CR_EXPOSE_GLOBAL_SINGLETON (ServerQueryHook, fakequeries);

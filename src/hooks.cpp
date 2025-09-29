@@ -13,12 +13,12 @@ int32_t ServerQueryHook::sendTo (int socket, const void *message, size_t length,
    };
 
    auto packet = reinterpret_cast <const uint8_t *> (message);
-   constexpr int32_t packetLength = 5;
+   constexpr int32_t kPacketLength = 5;
 
    // player replies response
-   if (length > packetLength && memcmp (packet, "\xff\xff\xff\xff", packetLength - 1) == 0) {
+   if (length > kPacketLength && memcmp (packet, "\xff\xff\xff\xff", kPacketLength - 1) == 0) {
       if (packet[4] == 'D') {
-         QueryBuffer buffer { packet, length, packetLength };
+         QueryBuffer buffer { packet, length, kPacketLength };
          auto count = buffer.read <uint8_t> ();
 
          for (uint8_t i = 0; i < count; ++i) {
@@ -32,7 +32,7 @@ int32_t ServerQueryHook::sendTo (int socket, const void *message, size_t length,
          return send (buffer.data ());
       }
       else if (packet[4] == 'I') {
-         QueryBuffer buffer { packet, length, packetLength };
+         QueryBuffer buffer { packet, length, kPacketLength };
          buffer.skip <uint8_t> (); // protocol
 
          // skip server name, folder, map game
@@ -48,7 +48,7 @@ int32_t ServerQueryHook::sendTo (int socket, const void *message, size_t length,
          return send (buffer.data ());
       }
       else if (packet[4] == 'm') {
-         QueryBuffer buffer { packet, length, packetLength };
+         QueryBuffer buffer { packet, length, kPacketLength };
 
          buffer.shiftToEnd (); // shift to the end of buffer
          buffer.write <uint8_t> (0); // zero out bot count
@@ -102,7 +102,7 @@ void ServerQueryHook::init () {
    }
 }
 
-SharedLibrary::Func DynamicLinkerHook::lookup (SharedLibrary::Handle module, const char *function) {
+SharedLibrary::Func EntityLinkHook::lookupSymbol (SharedLibrary::Handle module, const char *function) {
    static const auto &gamedll = game.lib ().handle ();
    static const auto &self = m_self.handle ();
 
@@ -124,7 +124,7 @@ SharedLibrary::Func DynamicLinkerHook::lookup (SharedLibrary::Handle module, con
       return resolve (module);
    }
 
-#if defined (CR_WINDOWS)
+#if defined(CR_WINDOWS)
    if (HIWORD (function) == 0) {
       return resolve (module);
    }
@@ -148,7 +148,7 @@ SharedLibrary::Func DynamicLinkerHook::lookup (SharedLibrary::Handle module, con
    return nullptr;
 }
 
-bool DynamicLinkerHook::callPlayerFunction (edict_t *ent) {
+bool EntityLinkHook::callPlayerFunction (edict_t *ent) {
    auto callPlayer = [&] () {
       reinterpret_cast <EntityProto> (reinterpret_cast <void *> (m_exports["player"])) (&ent->v);
    };
@@ -169,20 +169,25 @@ bool DynamicLinkerHook::callPlayerFunction (edict_t *ent) {
    return true;
 }
 
-bool DynamicLinkerHook::needsBypass () const {
+bool EntityLinkHook::needsBypass () const {
    return !plat.win && !game.isDedicated ();
 }
 
-void DynamicLinkerHook::initialize () {
+void EntityLinkHook::initialize () {
+#if defined(LINKENT_STATIC)
+   return;
+#endif
+
    if (plat.isNonX86 () || game.is (GameFlags::Metamod)) {
       return;
    }
+   constexpr StringRef kKernel32Module = "kernel32.dll";
 
-   m_dlsym.initialize ("kernel32.dll", "GetProcAddress", DLSYM_FUNCTION);
+   m_dlsym.initialize (kKernel32Module, "GetProcAddress", DLSYM_FUNCTION);
    m_dlsym.install (reinterpret_cast <void *> (lookupHandler), true);
 
    if (needsBypass ()) {
-      m_dlclose.initialize ("kernel32.dll", "FreeLibrary", DLCLOSE_FUNCTION);
+      m_dlclose.initialize (kKernel32Module, "FreeLibrary", DLCLOSE_FUNCTION);
       m_dlclose.install (reinterpret_cast <void *> (closeHandler), true);
    }
    m_self.locate (&engfuncs);

@@ -7,12 +7,12 @@
 
 #include <yapb.h>
 
-ConVar cv_graph_fixcamp ("graph_fixcamp", "0", "Specifies whether bot should not 'fix' camp directions of camp waypoints when loading old PWF format.");
-ConVar cv_graph_url ("graph_url", product.download.chars (), "Specifies the URL from which bots will be able to download graph in case of missing local one. Set to empty, if no downloads needed.", false, 0.0f, 0.0f);
-ConVar cv_graph_url_upload ("graph_url_upload", product.upload.chars (), "Specifies the URL to which bots will try to upload the graph file to database.", false, 0.0f, 0.0f);
-ConVar cv_graph_auto_save_count ("graph_auto_save_count", "15", "Every N graph nodes placed on map, the graph will be saved automatically (without checks).", true, 0.0f, kMaxNodes);
-ConVar cv_graph_draw_distance ("graph_draw_distance", "400", "Maximum distance to draw graph nodes from editor viewport.", true, 64.0f, 3072.0f);
-ConVar cv_graph_auto_collect_db ("graph_auto_collect_db", "1", "Allows bots to exchange your graph files with graph database automatically.");
+ConVar cv_graph_fixcamp ("graph_fixcamp", "0", "Specifies whether the bot should not 'fix' camp directions of camp waypoints when loading the old PWF format.");
+ConVar cv_graph_url ("graph_url", product.download.chars (), "Specifies the URL from which bots will be able to download the graph in case of a missing local one. Set to empty if no downloads are needed.", false, 0.0f, 0.0f);
+ConVar cv_graph_url_upload ("graph_url_upload", product.upload.chars (), "Specifies the URL to which bots will try to upload the graph file to the database.", false, 0.0f, 0.0f);
+ConVar cv_graph_auto_save_count ("graph_auto_save_count", "15", "Every N graph nodes placed on the map, the graph will be saved automatically (without checks).", true, 0.0f, kMaxNodes);
+ConVar cv_graph_draw_distance ("graph_draw_distance", "400", "Maximum distance to draw graph nodes from the editor viewport.", true, 64.0f, 3072.0f);
+ConVar cv_graph_auto_collect_db ("graph_auto_collect_db", "1", "Allows bots to exchange your graph files with the graph database automatically.");
 
 void BotGraph::reset () {
    // this function initialize the graph structures..
@@ -20,9 +20,9 @@ void BotGraph::reset () {
    m_editFlags = 0;
    m_autoSaveCount = 0;
 
-   m_learnVelocity = nullptr;
-   m_learnPosition = nullptr;
-   m_lastNode = nullptr;
+   m_learnVelocity.clear ();
+   m_learnPosition.clear ();
+   m_lastNode.clear ();
 
    m_pathDisplayTime = 0.0f;
    m_arrowDisplayTime = 0.0f;
@@ -31,8 +31,8 @@ void BotGraph::reset () {
    m_narrowChecked = false;
    m_lightChecked = false;
 
-   m_graphAuthor.clear ();
-   m_graphModified.clear ();
+   m_info.author.clear ();
+   m_info.modified.clear ();
 
    m_paths.clear ();
 }
@@ -76,8 +76,8 @@ int BotGraph::clearConnections (int index) {
    };
    auto &path = m_paths[index];
 
-   Connection sorted[kMaxNodeLinks];
-   Connection top;
+   Connection sorted[kMaxNodeLinks] {};
+   Connection top {};
 
    for (int i = 0; i < kMaxNodeLinks; ++i) {
       auto &cur = sorted[i];
@@ -207,7 +207,6 @@ int BotGraph::clearConnections (int index) {
       }
       return false;
    };
-
 
    for (int i = 2; i < kMaxNodeLinks; ++i) {
       while (inspect_p0 (i)) {}
@@ -407,10 +406,13 @@ int BotGraph::clearConnections (int index) {
 }
 
 int BotGraph::getBspSize () {
-   MemFile file (strings.format ("maps/%s.bsp", game.getMapName ()));
+   if (File bsp { strings.joinPath (game.getRunningModName (), "maps", game.getMapName ()) + ".bsp", "rb" }) {
+      return static_cast <int> (bsp.length ());
+   }
 
-   if (file) {
-      return static_cast <int> (file.length ());
+   // worst case, load using engine (engfuncs.pfnGetFileSize isn't available on some legacy engines)
+   if (MemFile bsp { strings.joinPath (game.getRunningModName (), "maps", game.getMapName ()) + ".bsp" }) {
+      return static_cast <int> (bsp.length ());
    }
    return 0;
 }
@@ -525,6 +527,14 @@ int BotGraph::getEditorNearest (const float maxRange) {
 int BotGraph::getNearest (const Vector &origin, const float range, int flags) {
    // find the nearest node to that origin and return the index
 
+   // if not alot of nodes on the map, do not bother to use buckets here, we're dont
+   // get any performance improvement
+   constexpr auto kMinNodesForBucketsThreshold = 164;
+
+   if (length () < kMinNodesForBucketsThreshold) {
+      return getNearestNoBuckets (origin, range, flags);
+   }
+
    if (range > 256.0f && !cr::fequal (range, kInfiniteDistance)) {
       return getNearestNoBuckets (origin, range, flags);
    }
@@ -556,17 +566,17 @@ int BotGraph::getNearest (const Vector &origin, const float range, int flags) {
    return index;
 }
 
-IntArray BotGraph::getNearestInRadius (float radius, const Vector &origin, int maxCount) {
+IntArray BotGraph::getNearestInRadius (const float radius, const Vector &origin, int maxCount) {
    // returns all nodes within radius from position
 
    const float radiusSq = cr::sqrf (radius);
 
-   IntArray result;
+   IntArray result {};
    const auto &bucket = getNodesInBucket (origin);
 
    if (bucket.length () < kMaxNodeLinks || radius > cr::sqrf (256.0f)) {
       for (const auto &path : m_paths) {
-         if (maxCount != -1 && static_cast <int> (result.length ()) > maxCount) {
+         if (maxCount != -1 && result.length <int32_t> () > maxCount) {
             break;
          }
 
@@ -578,7 +588,7 @@ IntArray BotGraph::getNearestInRadius (float radius, const Vector &origin, int m
    }
 
    for (const auto &at : bucket) {
-      if (maxCount != -1 && static_cast <int> (result.length ()) > maxCount) {
+      if (maxCount != -1 && result.length <int32_t> () > maxCount) {
          break;
       }
 
@@ -589,8 +599,12 @@ IntArray BotGraph::getNearestInRadius (float radius, const Vector &origin, int m
    return result;
 }
 
+bool BotGraph::isAnalyzed () const {
+   return (m_info.header.options & StorageOption::Analyzed);
+}
+
 void BotGraph::add (int type, const Vector &pos) {
-   if (game.isNullEntity (m_editor) && !analyzer.isAnalyzing ()) {
+   if (!hasEditor () && !analyzer.isAnalyzing ()) {
       return;
    }
    int index = kInvalidNodeIndex;
@@ -600,7 +614,7 @@ void BotGraph::add (int type, const Vector &pos) {
    Vector newOrigin = pos;
 
    if (newOrigin.empty ()) {
-      if (game.isNullEntity (m_editor)) {
+      if (!hasEditor ()) {
          return;
       }
       newOrigin = m_editor->v.origin;
@@ -715,8 +729,8 @@ void BotGraph::add (int type, const Vector &pos) {
 
       // store the origin (location) of this node
       path->origin = newOrigin;
-      path->start = nullptr;
-      path->end = nullptr;
+      path->start.clear ();
+      path->end.clear ();
 
       path->display = 0.0f;
       path->light = kInvalidLightLevel;
@@ -725,7 +739,7 @@ void BotGraph::add (int type, const Vector &pos) {
          link.index = kInvalidNodeIndex;
          link.distance = 0;
          link.flags = 0;
-         link.velocity = nullptr;
+         link.velocity.clear ();
       }
 
       // autosave nodes here and there
@@ -932,7 +946,7 @@ void BotGraph::erase (int target) {
             link.index = kInvalidNodeIndex;
             link.flags = 0;
             link.distance = 0;
-            link.velocity = nullptr;
+            link.velocity.clear ();
          }
       }
    }
@@ -1023,7 +1037,7 @@ int BotGraph::getFacingIndex () {
       auto angles = (to.angles () - m_editor->v.v_angle).clampAngles ();
 
       // skip the nodes that are too far away from us, and we're not looking at them directly
-      if (to.lengthSq () > cr::sqrf (500.0f) || cr::abs (angles.y) > result.second) {
+      if (to.lengthSq () > cr::sqrf (cv_graph_draw_distance.as <float> ()) || cr::abs (angles.y) > result.second) {
          continue;
       }
 
@@ -1132,7 +1146,7 @@ void BotGraph::erasePath () {
       link.index = kInvalidNodeIndex;
       link.distance = 0;
       link.flags = 0;
-      link.velocity = nullptr;
+      link.velocity.clear ();
    };
 
    for (auto &link : m_paths[nodeFrom].links) {
@@ -1175,7 +1189,7 @@ void BotGraph::resetPath (int index) {
       link.index = kInvalidNodeIndex;
       link.distance = 0;
       link.flags = 0;
-      link.velocity = nullptr;
+      link.velocity.clear ();
    };
 
    // clean all incoming
@@ -1267,24 +1281,28 @@ void BotGraph::showStats () {
 }
 
 void BotGraph::showFileInfo () {
+   const auto &info = m_info.header;
+   const auto &exten = m_info.exten;
+
    msg ("header:");
-   msg ("  magic: %d", m_graphHeader.magic);
-   msg ("  version: %d", m_graphHeader.version);
-   msg ("  node_count: %d", m_graphHeader.length);
-   msg ("  compressed_size: %dkB", m_graphHeader.compressed / 1024);
-   msg ("  uncompressed_size: %dkB", m_graphHeader.uncompressed / 1024);
-   msg ("  options: %d", m_graphHeader.options); // display as string ?
-   msg ("  analyzed: %s", isAnalyzed () ? "yes" : "no"); // display as string ?
+   msg ("  magic: %d", info.magic);
+   msg ("  version: %d", info.version);
+   msg ("  node_count: %d", info.length);
+   msg ("  compressed_size: %dkB", info.compressed / 1024);
+   msg ("  uncompressed_size: %dkB", info.uncompressed / 1024);
+   msg ("  options: %d", info.options); // display as string ?
+   msg ("  analyzed: %s", isAnalyzed () ? conf.translate ("yes") : conf.translate ("no")); // display as string ?
+   msg ("  pathfinder: %s", planner.isPathsCheckFailed () ? "floyd" : "astar");
 
    msg ("");
 
    msg ("extensions:");
-   msg ("  author: %s", m_extenHeader.author);
-   msg ("  modified_by: %s", m_extenHeader.modified);
-   msg ("  bsp_size: %d", m_extenHeader.mapSize);
+   msg ("  author: %s", exten.author);
+   msg ("  modified_by: %s", exten.modified);
+   msg ("  bsp_size: %d", exten.mapSize);
 }
 
-void BotGraph::emitNotify (int32_t sound) {
+void BotGraph::emitNotify (int32_t sound) const {
    static HashMap <int32_t, String> notifySounds = {
       { NotifySound::Added, "weapons/xbow_hit1.wav" },
       { NotifySound::Change, "weapons/mine_activate.wav" },
@@ -1367,7 +1385,7 @@ void BotGraph::syncCollectOnline () {
 
       // decode answer
       if (lc.open (localFile, "rt")) {
-         String lines;
+         String lines {};
 
          if (lc.getLine (lines)) {
             wanted = lines.split (",");
@@ -1429,7 +1447,7 @@ void BotGraph::calculatePathRadius (int index) {
    // calculate "wayzones" for the nearest node  (meaning a dynamic distance area to vary node origin)
 
    auto &path = m_paths[index];
-   Vector start, direction;
+   Vector start {}, direction {};
 
    if ((path.flags & (NodeFlag::Ladder | NodeFlag::Goal | NodeFlag::Camp | NodeFlag::Rescue | NodeFlag::Crouch)) || m_jumpLearnNode) {
       path.radius = 0.0f;
@@ -1542,7 +1560,7 @@ void BotGraph::initLightLevels () {
    if (m_paths.empty () || m_lightChecked) {
       return;
    }
-   auto players = bots.countTeamPlayers ();
+   const auto &players = bots.countTeamPlayers ();
 
    // do calculation if some-one is already playing on the server
    if (!players.first && !players.second) {
@@ -1566,11 +1584,11 @@ void BotGraph::initNarrowPlaces () {
    constexpr int32_t kNarrowPlacesMinGraphVersion = 2;
 
    // if version 2 or higher, narrow places already initialized and saved into file
-   if (m_graphHeader.version >= kNarrowPlacesMinGraphVersion && !hasEditFlag (GraphEdit::On)) {
+   if (m_info.header.version >= kNarrowPlacesMinGraphVersion && !hasEditFlag (GraphEdit::On)) {
       m_narrowChecked = true;
       return;
    }
-   TraceResult tr;
+   TraceResult tr {};
 
    const auto distance = 178.0f;
    const auto worldspawn = game.getStartEntity ();
@@ -1608,7 +1626,7 @@ void BotGraph::initNarrowPlaces () {
          }
          const Vector &ang = ((path.origin - m_paths[link.index].origin).normalize () * distance).angles ();
 
-         Vector forward, right, upward;
+         Vector forward {}, right {}, upward {};
          ang.angleVectors (&forward, &right, &upward);
 
          // helper lambda
@@ -1657,6 +1675,7 @@ void BotGraph::populateNodes () {
    m_sniperPoints.clear ();
    m_visitedGoals.clear ();
    m_humanCampPoints.clear ();
+   m_nodeNumbers.clear ();
 
    for (const auto &path : m_paths) {
       if (path.flags & NodeFlag::TerroristOnly) {
@@ -1680,6 +1699,7 @@ void BotGraph::populateNodes () {
       else if (path.flags & NodeFlag::HumanCamp) {
          m_humanCampPoints.push (path.number);
       }
+      m_nodeNumbers.push (path.number);
    }
 }
 
@@ -1687,9 +1707,7 @@ bool BotGraph::convertOldFormat () {
    MemFile fp (bstor.buildPath (BotFile::PodbotPWF, true));
 
    if (!fp) {
-      if (!fp.open (bstor.buildPath (BotFile::EbotEWP, true))) {
-         return false;
-      }
+      return false;
    }
 
    PODGraphHeader header {};
@@ -1739,7 +1757,7 @@ bool BotGraph::convertOldFormat () {
             if (!m_paths.empty ()) {
                msg ("Converting old PWF to new format Graph.");
 
-               m_graphAuthor = header.author;
+               m_info.author = header.author;
 
                // clean editor so graph will be saved with header's author
                auto editor = m_editor;
@@ -1766,11 +1784,15 @@ bool BotGraph::loadGraphData () {
    ExtenHeader exten {};
    int32_t outOptions = 0;
 
-   m_graphHeader = {};
-   m_extenHeader = {};
+   m_info.header = {};
+   m_info.exten = {};
 
    // re-initialize paths
    reset ();
+
+   // initialize compression
+   ULZ ulz {};
+   bstor.setUlzInstance (&ulz);
 
    // check if loaded
    const bool dataLoaded = bstor.load <Path> (m_paths, &exten, &outOptions);
@@ -1785,15 +1807,15 @@ bool BotGraph::loadGraphData () {
       StringRef author = exten.author;
 
       if ((outOptions & StorageOption::Official) || author.startsWith ("official") || author.length () < 2) {
-         m_graphAuthor.assign (product.name);
+         m_info.author.assign (product.name);
       }
       else {
-         m_graphAuthor.assign (author);
+         m_info.author.assign (author);
       }
       StringRef modified = exten.modified;
 
       if (!modified.empty () && !modified.contains ("(none)")) {
-         m_graphModified.assign (exten.modified);
+         m_info.modified.assign (exten.modified);
       }
       planner.init (); // initialize our little path planner
       practice.load (); // load bots practice
@@ -1802,11 +1824,18 @@ bool BotGraph::loadGraphData () {
       populateNodes ();
 
       if (exten.mapSize > 0) {
-         int mapSize = getBspSize ();
+         const int mapSize = getBspSize ();
 
-         if (mapSize != exten.mapSize) {
+         if (mapSize > 0 && mapSize != exten.mapSize) {
             msg ("Warning: Graph data is probably not for this map. Please check bots behaviour.");
          }
+      }
+
+      // notify user about graph problems
+      if (planner.isPathsCheckFailed () && !graph.isAnalyzed ()) {
+         ctrl.msg ("Warning: Graph data has failed sanity check.");
+         ctrl.msg ("Warning: Bots will use only shortest-path algo for path finding.");
+         ctrl.msg ("Warning: This may significantly affect bots behavior on this map.");
       }
       cv_debug_goal.set (kInvalidNodeIndex);
 
@@ -1827,10 +1856,10 @@ bool BotGraph::canDownload () {
 
 bool BotGraph::saveGraphData () {
    auto options = StorageOption::Graph | StorageOption::Exten;
-   String editorName;
+   String editorName {};
 
-   if (game.isNullEntity (m_editor) && !m_graphAuthor.empty ()) {
-      editorName = m_graphAuthor;
+   if (!hasEditor () && !m_info.author.empty ()) {
+      editorName = m_info.author;
 
       if (!game.isDedicated ()) {
          options |= StorageOption::Recovered;
@@ -1855,15 +1884,15 @@ bool BotGraph::saveGraphData () {
    ExtenHeader exten {};
 
    // only modify the author if no author currently assigned to graph file
-   if (m_graphAuthor.empty () || strings.isEmpty (m_extenHeader.author)) {
+   if (m_info.author.empty () || strings.isEmpty (m_info.exten.author)) {
       strings.copy (exten.author, editorName.chars (), cr::bufsize (exten.author));
    }
    else {
-      strings.copy (exten.author, m_extenHeader.author, cr::bufsize (exten.author));
+      strings.copy (exten.author, m_info.exten.author, cr::bufsize (exten.author));
    }
 
    // only update modified by, if name differs
-   if (m_graphAuthor != editorName && !strings.isEmpty (m_extenHeader.author)) {
+   if (m_info.author != editorName && !strings.isEmpty (m_info.exten.author)) {
       strings.copy (exten.modified, editorName.chars (), cr::bufsize (exten.author));
    }
    exten.mapSize = getBspSize ();
@@ -1880,10 +1909,10 @@ bool BotGraph::saveGraphData () {
 void BotGraph::saveOldFormat () {
    PODGraphHeader header {};
 
-   String editorName;
+   String editorName {};
 
-   if (game.isNullEntity (m_editor) && !m_graphAuthor.empty ()) {
-      editorName = m_graphAuthor;
+   if (!hasEditor ()  && !m_info.author.empty ()) {
+      editorName = m_info.author;
    }
    else if (!game.isNullEntity (m_editor)) {
       editorName = m_editor->v.netname.chars ();
@@ -1900,7 +1929,7 @@ void BotGraph::saveOldFormat () {
    header.fileVersion = StorageVersion::Podbot;
    header.pointNumber = length ();
 
-   File fp;
+   File fp {};
 
    // file was opened
    if (fp.open (bstor.buildPath (BotFile::PodbotPWF), "wb")) {
@@ -1927,7 +1956,7 @@ float BotGraph::calculateTravelTime (float maxSpeed, const Vector &src, const Ve
    return origin.distance2d (src) / maxSpeed;
 }
 
-bool BotGraph::isNodeReacheableEx (const Vector &src, const Vector &destination, const float maxHeight) {
+bool BotGraph::isNodeReacheableEx (const Vector &src, const Vector &destination, const float maxHeight) const {
    TraceResult tr {};
 
    float distanceSq = destination.distanceSq (src);
@@ -2018,11 +2047,11 @@ bool BotGraph::isNodeReacheableEx (const Vector &src, const Vector &destination,
 }
 
 
-bool BotGraph::isNodeReacheable (const Vector &src, const Vector &destination) {
+bool BotGraph::isNodeReacheable (const Vector &src, const Vector &destination) const {
    return isNodeReacheableEx (src, destination, 45.0f);
 }
 
-bool BotGraph::isNodeReacheableWithJump (const Vector &src, const Vector &destination) {
+bool BotGraph::isNodeReacheableWithJump (const Vector &src, const Vector &destination) const {
    return isNodeReacheableEx (src, destination, cv_graph_analyze_max_jump_height.as <float> ());
 }
 
@@ -2265,7 +2294,7 @@ void BotGraph::frame () {
 
       // draw the radius circle
       Vector origin = (path.flags & NodeFlag::Crouch) ? path.origin : path.origin - Vector (0.0f, 0.0f, 18.0f);
-      Color radiusColor { 36, 36, 255 };
+      constexpr Color radiusColor { 36, 36, 255 };
 
       // if radius is nonzero, draw a full circle
       if (path.radius > 0.0f) {
@@ -2331,7 +2360,7 @@ void BotGraph::frame () {
 
       // very helpful stuff..
       auto getNodeData = [this] (StringRef type, int node) -> String {
-         String message, flags;
+         String message {}, flags {};
 
          const auto &p = m_paths[node];
          bool jumpPoint = false;
@@ -2367,7 +2396,12 @@ void BotGraph::frame () {
          message.assignf ("      %s node:\n"
             "       Node %d of %d, Radius: %.1f, Light: %s\n"
             "       Flags: %s\n"
-            "       Origin: (%.1f, %.1f, %.1f)\n", type, node, m_paths.length () - 1, p.radius, p.light == kInvalidLightLevel ? "Invalid" : strings.format ("%1.f", p.light), flags, p.origin.x, p.origin.y, p.origin.z);
+            "       Origin: (%.1f, %.1f, %.1f)\n", 
+            type, node,  m_paths.length () - 1,  p.radius,
+            cr::fequal (p.light, kInvalidLightLevel) ? "Invalid" : strings.format ("%1.f", p.light),
+            flags, p.origin.x, p.origin.y, p.origin.z
+         );
+
          return message;
       };
 
@@ -2390,10 +2424,15 @@ void BotGraph::frame () {
          const int dangerIndexCT = practice.getIndex (Team::CT, nearestIndex, nearestIndex);
          const int dangerIndexT = practice.getIndex (Team::Terrorist, nearestIndex, nearestIndex);
 
-         String practiceText;
+         String practiceText {};
          practiceText.assignf ("      Node practice data (index / damage):\n"
             "       CT: %d / %d\n"
-            "       T:  %d / %d\n\n", dangerIndexCT, dangerIndexCT != kInvalidNodeIndex ? practice.getDamage (Team::CT, nearestIndex, dangerIndexCT) : 0, dangerIndexT, dangerIndexT != kInvalidNodeIndex ? practice.getDamage (Team::Terrorist, nearestIndex, dangerIndexT) : 0);
+            "       T:  %d / %d\n\n",
+            dangerIndexCT,
+            dangerIndexCT != kInvalidNodeIndex ? practice.getDamage (Team::CT, nearestIndex, dangerIndexCT) : 0,
+            dangerIndexT,
+            dangerIndexT != kInvalidNodeIndex ? practice.getDamage (Team::Terrorist, nearestIndex, dangerIndexT) : 0
+         );
 
          sendHudMessage ({ 255, 255, 255 }, 0.0f, 0.16f, practiceText + timeMessage);
       }
@@ -2418,14 +2457,14 @@ bool BotGraph::isConnected (int index) {
    return false;
 }
 
-bool BotGraph::checkNodes (bool teleportPlayer) {
-
+bool BotGraph::checkNodes (bool teleportPlayer, bool onlyPaths) {
    auto teleport = [&] (const Path &path) -> void {
       if (teleportPlayer) {
          engfuncs.pfnSetOrigin (m_editor, path.origin);
          setEditFlag (GraphEdit::On | GraphEdit::Noclip);
       }
    };
+   const bool showErrors = !onlyPaths;
 
    int terrPoints = 0;
    int ctPoints = 0;
@@ -2436,14 +2475,18 @@ bool BotGraph::checkNodes (bool teleportPlayer) {
       int connections = 0;
 
       if (path.number != static_cast <int> (m_paths.index (path))) {
-         msg ("Node %d path differs from index %d.", path.number, m_paths.index (path));
+         if (showErrors) {
+            msg ("Node %d path differs from index %d.", path.number, m_paths.index (path));
+         }
          break;
       }
 
       for (const auto &test : path.links) {
          if (test.index != kInvalidNodeIndex) {
             if (test.index > length ()) {
-               msg ("Node %d connected with invalid node %d.", path.number, test.index);
+               if (showErrors) {
+                  msg ("Node %d connected with invalid node %d.", path.number, test.index);
+               }
                return false;
             }
             ++connections;
@@ -2453,14 +2496,18 @@ bool BotGraph::checkNodes (bool teleportPlayer) {
 
       if (connections == 0) {
          if (!isConnected (path.number)) {
-            msg ("Node %d isn't connected with any other node.", path.number);
+            if (showErrors) {
+               msg ("Node %d isn't connected with any other node.", path.number);
+            }
             return false;
          }
       }
 
       if (path.flags & NodeFlag::Camp) {
          if (path.end.empty ()) {
-            msg ("Node %d camp-endposition not set.", path.number);
+            if (showErrors) {
+               msg ("Node %d camp-endposition not set.", path.number);
+            }
             return false;
          }
       }
@@ -2480,50 +2527,60 @@ bool BotGraph::checkNodes (bool teleportPlayer) {
       for (const auto &test : path.links) {
          if (test.index != kInvalidNodeIndex) {
             if (!exists (test.index)) {
-               msg ("Node %d path index %d out of range.", path.number, test.index);
+               if (showErrors) {
+                  teleport (path);
+
+                  msg ("Node %d path index %d out of range.", path.number, test.index);
+               }
                teleport (path);
 
                return false;
             }
             else if (test.index == path.number) {
-               msg ("Node %d path index %d points to itself.", path.number, test.index);
-               teleport (path);
+               if (showErrors) {
+                  teleport (path);
 
+                  msg ("Node %d path index %d points to itself.", path.number, test.index);
+               }
                return false;
             }
          }
       }
    }
 
-   if (game.mapIs (MapFlags::HostageRescue)) {
+   if (!onlyPaths && game.mapIs (MapFlags::HostageRescue)) {
       if (rescuePoints == 0) {
          msg ("You didn't set a rescue point.");
          return false;
       }
    }
-   if (terrPoints == 0) {
-      msg ("You didn't set any terrorist important point.");
-      return false;
-   }
-   else if (ctPoints == 0) {
-      msg ("You didn't set any CT important point.");
-      return false;
-   }
-   else if (goalPoints == 0) {
-      msg ("You didn't set any goal point.");
-      return false;
+
+   // only check paths, but not necessity of different nodes
+   if (!onlyPaths) {
+      if (terrPoints == 0) {
+         msg ("You didn't set any terrorist important point.");
+         return false;
+      }
+      else if (ctPoints == 0) {
+         msg ("You didn't set any CT important point.");
+         return false;
+      }
+      else if (goalPoints == 0) {
+         msg ("You didn't set any goal point.");
+         return false;
+      }
    }
 
    // perform DFS instead of floyd-warshall, this shit speedup this process in a bit
-   const auto length = cr::min (static_cast <size_t> (kMaxNodes), m_paths.length ());
+   const auto length = cr::min (static_cast <size_t> (kMaxNodes), m_paths.length () + 1);
 
    // ensure valid capacity
    assert (length > 8 && length < static_cast <size_t> (kMaxNodes));
 
-   PathWalk walk;
+   PathWalk walk {};
    walk.init (length);
 
-   Array <bool> visited;
+   Array <bool> visited {};
    visited.resize (length);
 
    // first check incoming connectivity, initialize the "visited" table
@@ -2552,7 +2609,9 @@ bool BotGraph::checkNodes (bool teleportPlayer) {
 
    for (const auto &path : m_paths) {
       if (!visited[path.number]) {
-         msg ("Path broken from node 0 to node %d.", path.number);
+         if (showErrors) {
+            msg ("Path broken from node 0 to node %d.", path.number);
+         }
          teleport (path);
 
          return false;
@@ -2560,7 +2619,7 @@ bool BotGraph::checkNodes (bool teleportPlayer) {
    }
 
    // then check outgoing connectivity
-   Array <IntArray> outgoingPaths; // store incoming paths for speedup
+   Array <IntArray> outgoingPaths {}; // store incoming paths for speedup
    outgoingPaths.resize (length);
 
    for (const auto &path : m_paths) {
@@ -2595,9 +2654,11 @@ bool BotGraph::checkNodes (bool teleportPlayer) {
 
    for (const auto &path : m_paths) {
       if (!visited[path.number]) {
-         msg ("Path broken from node %d to node 0.", path.number);
-         teleport (path);
+         if (showErrors) {
+            teleport (path);
 
+            msg ("Path broken from node %d to node 0.", path.number);
+         }
          return false;
       }
    }
@@ -2636,7 +2697,7 @@ void BotGraph::addBasic () {
       ladderLeft.z = ladderRight.z;
 
       TraceResult tr {};
-      Vector up, down, front, back;
+      Vector up {}, down {}, front {}, back {};
 
       Vector diff = ((ladderLeft - ladderRight) ^ nullptr) * 15.0f;
       front = back = game.getEntityOrigin (ent);
@@ -2681,7 +2742,7 @@ void BotGraph::addBasic () {
       game.searchEntities ("classname", classname, [&] (edict_t *ent) {
          Vector pos = game.getEntityOrigin (ent);
 
-         TraceResult tr;
+         TraceResult tr {};
          game.testLine (pos, pos - Vector (0.0f, 0.0f, 999.0f), TraceIgnore::Monsters, nullptr, &tr);
          tr.vecEndPos.z += 36.0f;
 
@@ -2719,7 +2780,7 @@ void BotGraph::setBombOrigin (bool reset, const Vector &pos) {
    }
 
    if (reset) {
-      m_bombOrigin = nullptr;
+      m_bombOrigin.clear ();
       bots.setBombPlanted (false);
 
       return;
@@ -2743,7 +2804,7 @@ void BotGraph::setBombOrigin (bool reset, const Vector &pos) {
    });
 
    if (!wasFound) {
-      m_bombOrigin = nullptr;
+      m_bombOrigin.clear ();
       bots.setBombPlanted (false);
    }
 }
@@ -2777,14 +2838,6 @@ BotGraph::BotGraph () {
    m_facingAtIndex = kInvalidNodeIndex;
    m_isOnLadder = false;
 
-   m_terrorPoints.clear ();
-   m_ctPoints.clear ();
-   m_goalPoints.clear ();
-   m_campPoints.clear ();
-   m_rescuePoints.clear ();
-   m_sniperPoints.clear ();
-   m_humanCampPoints.clear ();
-
    m_editFlags = 0;
 
    m_pathDisplayTime = 0.0f;
@@ -2792,22 +2845,6 @@ BotGraph::BotGraph () {
    m_autoPathDistance = 250.0f;
 
    m_editor = nullptr;
-}
-
-void BotGraph::initBuckets () {
-   m_hashTable.clear ();
-}
-
-void BotGraph::addToBucket (const Vector &pos, int index) {
-   m_hashTable[locateBucket (pos)].emplace (index);
-}
-
-const Array <int32_t> &BotGraph::getNodesInBucket (const Vector &pos) {
-   return m_hashTable[locateBucket (pos)];
-}
-
-bool BotGraph::isAnalyzed () const {
-   return (m_graphHeader.options & StorageOption::Analyzed);
 }
 
 void BotGraph::eraseFromBucket (const Vector &pos, int index) {
@@ -2822,10 +2859,10 @@ void BotGraph::eraseFromBucket (const Vector &pos, int index) {
 }
 
 int BotGraph::locateBucket (const Vector &pos) {
-   constexpr auto width = 8192;
+   constexpr auto kWidth = 8192;
 
    auto hash = [&] (float axis, int32_t shift) {
-      return ((static_cast <int> (axis) + width) & 0x007f80) >> shift;
+      return ((static_cast <int> (axis) + kWidth) & 0x007f80) >> shift;
    };
    return hash (pos.x, 15) + hash (pos.y, 7);
 }
@@ -2836,15 +2873,13 @@ void BotGraph::unassignPath (int from, int to) {
    link.index = kInvalidNodeIndex;
    link.distance = 0;
    link.flags = 0;
-   link.velocity = nullptr;
+   link.velocity.clear ();
 
    setEditFlag (GraphEdit::On);
    m_hasChanged = true;
 }
 
-void BotGraph::convertFromPOD (Path &path, const PODPath &pod) {
-   path = {};
-
+void BotGraph::convertFromPOD (Path &path, const PODPath &pod) const {
    path.number = pod.number;
    path.flags = pod.flags;
    path.origin = pod.origin;
@@ -2869,8 +2904,6 @@ void BotGraph::convertFromPOD (Path &path, const PODPath &pod) {
 }
 
 void BotGraph::convertToPOD (const Path &path, PODPath &pod) {
-   pod = {};
-
    pod.number = path.number;
    pod.flags = path.flags;
    pod.origin = path.origin;
@@ -2890,7 +2923,7 @@ void BotGraph::convertToPOD (const Path &path, PODPath &pod) {
    pod.vis.crouch = path.vis.crouch;
 }
 
-void BotGraph::convertCampDirection (Path &path) {
+void BotGraph::convertCampDirection (Path &path) const {
    // this function converts old vector based camp directions to angles, note that podbotmm graph
    // are already saved with angles, and converting this stuff may result strange look directions.
 

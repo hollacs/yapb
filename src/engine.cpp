@@ -9,9 +9,9 @@
 
 ConVar cv_csdm_mode ("csdm_mode", "0", "Enables or disables CSDM / FFA mode for bots.\nAllowed values: '0', '1', '2', '3'.\nIf '0', CSDM / FFA mode is auto-detected.\nIf '1', CSDM mode is enabled, but FFA is disabled.\nIf '2', CSDM and FFA mode is enabled.\nIf '3', CSDM and FFA mode is disabled.", true, 0.0f, 3.0f);
 ConVar cv_ignore_map_prefix_game_mode ("ignore_map_prefix_game_mode", "0", "If enabled, bots will not apply game modes based on map name prefix (fy_ and ka_ specifically).");
-ConVar cv_threadpool_workers ("threadpool_workers", "-1", "Maximum number of threads bot will run to process some tasks. -1 means half of CPU cores used.", true, -1.0f, static_cast <float> (plat.hardwareConcurrency ()));
-ConVar cv_grenadier_mode ("grenadier_mode", "0", "If enabled, bots will not apply throwing condition on grenades.");
-ConVar cv_ignore_enemies_after_spawn_time ("ignore_enemies_after_spawn_time", "0", "Make bots ignore enemies for a specified here time in seconds on new round. Useful for Zombie Plague mods.", false);
+ConVar cv_threadpool_workers ("threadpool_workers", "-1", "Maximum number of threads the bot will run to process some tasks. -1 means half of the CPU cores are used.", true, -1.0f, static_cast <float> (plat.hardwareConcurrency ()));
+ConVar cv_grenadier_mode ("grenadier_mode", "0", "If enabled, bots will not apply throwing conditions on grenades.");
+ConVar cv_ignore_enemies_after_spawn_time ("ignore_enemies_after_spawn_time", "0", "Makes bots ignore enemies for a specified time in seconds on a new round. Useful for Zombie Plague mods.", false);
 
 ConVar sv_skycolor_r ("sv_skycolor_r", nullptr, Var::GameRef);
 ConVar sv_skycolor_g ("sv_skycolor_g", nullptr, Var::GameRef);
@@ -51,6 +51,9 @@ void Game::precache () {
 void Game::levelInitialize (edict_t *entities, int max) {
    // this function precaches needed models and initialize class variables
 
+   // enable command handling
+   ctrl.setDenyCommands (false);
+
    // re-initialize bot's array
    bots.destroy ();
 
@@ -62,6 +65,7 @@ void Game::levelInitialize (edict_t *entities, int max) {
 
    // clear all breakables before initialization
    m_breakables.clear ();
+   m_checkedBreakables.clear ();
 
    // initialize all config files
    conf.loadConfigs ();
@@ -71,6 +75,9 @@ void Game::levelInitialize (edict_t *entities, int max) {
 
    // execute main config
    conf.loadMainConfig ();
+
+   // ensure the server admin is confident about features he's using
+   game.ensureHealthyGameEnvironment ();
 
    // load map-specific config
    conf.loadMapSpecificConfig ();
@@ -89,6 +96,9 @@ void Game::levelInitialize (edict_t *entities, int max) {
 
    // set the global timer function
    timerStorage.setTimeAddress (&globals->time);
+
+   // restart the fakeping timer, so it'll start working after mapchange
+   fakeping.restartTimer ();
 
    // go thru the all entities on map, and do whatever we're want
    for (int i = 0; i < max; ++i) {
@@ -148,7 +158,10 @@ void Game::levelInitialize (edict_t *entities, int max) {
       else if (classname.startsWith ("func_button")) {
          m_mapFlags |= MapFlags::HasButtons;
       }
-      else if (util.isShootableBreakable (ent)) {
+      else if (util.isBreakableEntity (ent, true)) {
+
+         // add breakable for material check
+         m_checkedBreakables[indexOfEntity (ent)] = ent->v.impulse <= 0;
          m_breakables.push (ent);
       }
    }
@@ -174,17 +187,17 @@ void Game::levelInitialize (edict_t *entities, int max) {
 }
 
 void Game::levelShutdown () {
-   // stop thread pool
-   worker.shutdown ();
-
    // save collected practice on shutdown
    practice.save ();
+
+   // stop thread pool
+   worker.shutdown ();
 
    // destroy global killer entity
    bots.destroyKillerEntity ();
 
    // ensure players are off on xash3d
-   if (game.is (GameFlags::Xash3D)) {
+   if (game.is (GameFlags::Xash3DLegacy)) {
       bots.kickEveryone (true, false);
    }
 
@@ -205,9 +218,13 @@ void Game::levelShutdown () {
 
    // suspend any analyzer tasks
    analyzer.suspend ();
+
+   // disable command handling
+   ctrl.setDenyCommands (true);
+
 }
 
-void Game::drawLine (edict_t *ent, const Vector &start, const Vector &end, int width, int noise, const Color &color, int brightness, int speed, int life, DrawLine type) {
+void Game::drawLine (edict_t *ent, const Vector &start, const Vector &end, int width, int noise, const Color &color, int brightness, int speed, int life, DrawLine type) const {
    // this function draws a arrow visible from the client side of the player whose player entity
    // is pointed to by ent, from the vector location start to the vector location end,
    // which is supposed to last life tenths seconds, and having the color defined by RGB.
@@ -287,13 +304,13 @@ bool Game::isDedicated () {
 const char *Game::getRunningModName () {
    // this function returns mod name without path
 
-   static String name;
+   static String name {};
 
    if (!name.empty ()) {
       return name.chars ();
    }
 
-   char engineModName[256];
+   char engineModName[StringBuffer::StaticBufferSize] {};
    engfuncs.pfnGetGameDir (engineModName);
 
    name = engineModName;
@@ -321,7 +338,7 @@ Vector Game::getEntityOrigin (edict_t *ent) {
    }
 
    if (ent->v.origin.empty ()) {
-      return ent->v.absmin + (ent->v.size * 0.5);
+      return ent->v.absmin + ent->v.size * 0.5;
    }
    return ent->v.origin;
 }
@@ -393,7 +410,7 @@ bool Game::checkVisibility (edict_t *ent, uint8_t *set) {
    return engfuncs.pfnCheckVisibility (ent, set) > 0;
 }
 
-uint8_t *Game::getVisibilitySet (Bot *bot, bool pvs) {
+uint8_t *Game::getVisibilitySet (Bot *bot, bool pvs) const {
    if (is (GameFlags::Xash3DLegacy)) {
       return nullptr;
    }
@@ -428,11 +445,11 @@ void Game::sendClientMessage (bool console, edict_t *ent, StringRef message) {
    };
 
    // do not excess limit
-   constexpr size_t maxSendLength = 125;
+   constexpr size_t kMaxSendLength = 125;
 
    // split up the string into chunks if needed (maybe check if it's multibyte?)
-   if (buffer.length () > maxSendLength) {
-      auto chunks = buffer.split (maxSendLength);
+   if (buffer.length () > kMaxSendLength) {
+      auto chunks = buffer.split (kMaxSendLength);
 
       // send in chunks
       for (size_t i = 0; i < chunks.length (); ++i) {
@@ -447,11 +464,11 @@ void Game::sendServerMessage (StringRef message) {
    // helper to sending the client message
 
    // do not excess limit
-   constexpr size_t maxSendLength = 175;
+   constexpr size_t kMaxSendLength = 175;
 
    // split up the string into chunks if needed (maybe check if it's multibyte?)
-   if (message.length () > maxSendLength) {
-      auto chunks = message.split (maxSendLength);
+   if (message.length () > kMaxSendLength) {
+      auto chunks = message.split <String> (kMaxSendLength);
 
       // send in chunks
       for (size_t i = 0; i < chunks.length (); ++i) {
@@ -463,7 +480,7 @@ void Game::sendServerMessage (StringRef message) {
 }
 
 void Game::sendHudMessage (edict_t *ent, const hudtextparms_t &htp, StringRef message) {
-   constexpr size_t maxSendLength = 512;
+   constexpr size_t kMaxSendLength = 512;
 
    if (game.isNullEntity (ent)) {
       return;
@@ -490,7 +507,7 @@ void Game::sendHudMessage (edict_t *ent, const hudtextparms_t &htp, StringRef me
    if (htp.effect == 2) {
       msg.writeShort (MessageWriter::fu16 (htp.fxTime, 8.0f));
    }
-   msg.writeString (message.substr (0, maxSendLength).chars ());
+   msg.writeString (message.substr (0, kMaxSendLength).chars ());
 }
 
 void Game::prepareBotArgs (edict_t *ent, String str) {
@@ -544,7 +561,7 @@ void Game::prepareBotArgs (edict_t *ent, String str) {
 
    if (str.find (';', 0) != String::InvalidIndex) {
       for (auto &&part : str.split (";")) {
-         parsePartArgs (part);
+         parsePartArgs (part.trim ());
       }
    }
    else {
@@ -577,7 +594,7 @@ bool Game::isSoftwareRenderer () {
       return false;
    }
 
-   // and on only windows version you can use software-render game. Linux, OSX always defaults to OpenGL
+   // and on only windows version you can use software-render game. Linux, macOS always defaults to OpenGL
    if (plat.win) {
       return plat.hasModule ("sw");
    }
@@ -586,8 +603,9 @@ bool Game::isSoftwareRenderer () {
 
 bool Game::is25thAnniversaryUpdate () {
    static ConVarRef sv_use_steam_networking ("sv_use_steam_networking");
+   static ConVarRef host_hl25_extended_structs ("host_hl25_extended_structs");
 
-   return sv_use_steam_networking.exists ();
+   return sv_use_steam_networking.exists () || host_hl25_extended_structs.value () > 0.0f;
 }
 
 void Game::pushConVar (StringRef name, StringRef value, StringRef info, bool bounded, float min, float max, int32_t varType, bool missingAction, StringRef regval, ConVar *self) {
@@ -640,7 +658,7 @@ void ConVar::revert () {
 
    for (const auto &var : cvars) {
       if (var.name == ptr->name) {
-         set (var.initial);
+         set (var.init.chars ());
          break;
       }
    }
@@ -656,7 +674,7 @@ void ConVar::setPrefix (StringRef name, int32_t type) {
 
 void Game::checkCvarsBounds () {
    for (const auto &var : m_cvars) {
-      if (!var.self->ptr) {
+      if (!var.self || !var.self->ptr) {
          continue;
       }
 
@@ -680,6 +698,27 @@ void Game::checkCvarsBounds () {
 
          // notify about that
          ctrl.msg ("Bogus value for cvar '%s', min is '%.1f' and max is '%.1f', and we're got '%s', value reverted to default '%.1f'.", var.name, var.min, var.max, str, var.initial);
+         continue;
+      }
+
+      /// prevent min/max problems
+      if (var.name.contains ("_max")) {
+         String minVar = String (var.name);
+         minVar.replace ("_max", "_min");
+
+         for (auto &mv : m_cvars) {
+            if (mv.name == minVar) {
+               const auto minValue = mv.self->as <float> ();
+
+               if (minValue > value) {
+                  var.self->set (minValue);
+                  mv.self->set (value);
+
+                  // notify about that
+                  ctrl.msg ("Bogus value for min/max cvar '%s' can't be higher than '%s'. Values swapped.", mv.name, var.name);
+               }
+            }
+         }
       }
    }
 
@@ -689,8 +728,17 @@ void Game::checkCvarsBounds () {
       static ConVarRef sv_forcesimulating ("sv_forcesimulating");
 
       if (sv_forcesimulating.exists () && !cr::fequal (sv_forcesimulating.value (), 1.0f)) {
-         game.print ("Force-enable Xash3D sv_forcesimulating cvar.");
+         print ("Force-enable Xash3D sv_forcesimulating cvar.");
          sv_forcesimulating.set ("1.0");
+      }
+   }
+}
+
+void Game::setCvarDescription (const ConVar &cv, StringRef info) {
+   for (auto &var : m_cvars) {
+      if (var.name == cv.name ()) {
+         var.info = info;
+         break;
       }
    }
 }
@@ -709,7 +757,7 @@ void Game::registerCvars (bool gameVars) {
          self.ptr = engfuncs.pfnCVarGetPointer (reg.name);
 
          if (!self.ptr) {
-            static cvar_t reg_;
+            static cvar_t reg_ {};
 
             // fix metamod' memlocs not found
             if (is (GameFlags::Metamod)) {
@@ -741,18 +789,66 @@ void Game::registerCvars (bool gameVars) {
    }
 }
 
+void Game::constructCSBinaryName (StringArray &libs) {
+   String libSuffix {}; // construct library suffix
+
+   if (plat.android) {
+      libSuffix += "_android";
+   }
+   else if (plat.psvita) {
+      libSuffix += "_psvita";
+   }
+
+   if (plat.x64) {
+      if (plat.arm) {
+         libSuffix += "_arm64";
+      }
+      else if (plat.ppc) {
+         libSuffix += "_ppc64le";
+      }
+      else {
+         libSuffix += "_amd64";
+      }
+   }
+   else {
+      if (plat.arm) {
+         // don't want to put whole build.h logic from xash3d, just set whatever is supported by the YaPB
+         if (plat.android) {
+            libSuffix += "_armv7l";
+         }
+         else {
+            libSuffix += "_armv7hf";
+         }
+      }
+      else if (!plat.nix && !plat.win && !plat.macos) {
+         libSuffix += "_i386";
+      }
+   }
+
+   if (libSuffix.empty ())
+      libs.insert (0, { "mp", "cs", "cs_i386" });
+   else {
+      // on Android, it's important to have `lib` prefix, otherwise package manager won't unpack the libraries
+      if (plat.android)
+         libs.insert (0, { "libcs" });
+      else
+         libs.insert (0, { "mp", "cs" });
+
+      for (auto &lib : libs) {
+         lib += libSuffix;
+      }
+   }
+}
+
 bool Game::loadCSBinary () {
    StringRef modname = getRunningModName ();
 
    if (modname.empty ()) {
       return false;
    }
-   Array <StringRef> libs { "mp", "cs", "cs_i386" };
 
-   // lookup for x64 binaries first
-   if (plat.x64) {
-      libs.insert (0, { "mp_amd64", "cs_amd64" });
-   }
+   StringArray libs {};
+   constructCSBinaryName (libs);
 
    auto libCheck = [&] (StringRef mod, StringRef dll) {
       // try to load gamedll
@@ -770,11 +866,30 @@ bool Game::loadCSBinary () {
 
    // search the libraries inside game dlls directory
    for (const auto &lib : libs) {
-      auto path = strings.joinPath (modname, "dlls", lib) + kLibrarySuffix;
+      String path {};
 
-      // if we can't read file, skip it
-      if (!plat.fileExists (path.chars ())) {
-         continue;
+      if (plat.android) {
+         // this will be removed as soon as mod downloader will be implemented on engine side
+         auto gamelibdir = plat.env ("XASH3D_GAMELIBDIR");
+         path = strings.joinPath (gamelibdir, lib) + kLibrarySuffix;
+
+         // if we can't read file, skip it
+         if (!plat.fileExists (path.chars ())) {
+            path = "";
+         }
+      }
+
+      if (plat.emscripten) {
+        path = String(plat.env ("XASH3D_GAMELIBPATH")); // defined by launcher
+      }
+
+      if (path.empty()) {
+         path = strings.joinPath (modname, "dlls", lib) + kLibrarySuffix;
+
+         // if we can't read file, skip it
+         if (!plat.fileExists (path.chars ())) {
+            continue;
+         }
       }
 
       // special case, czero is always detected first, as it's has custom directory
@@ -820,13 +935,23 @@ bool Game::loadCSBinary () {
          }
 
          if (entity != nullptr) {
-            m_gameFlags |= (GameFlags::Modern | GameFlags::HasBotVoice | GameFlags::HasFakePings);
+            m_gameFlags |= (GameFlags::Modern | GameFlags::HasBotVoice);
+
+            // no fake pings on xash3d
+            if (!(m_gameFlags & (GameFlags::Xash3D | GameFlags::Xash3DLegacy))) {
+               m_gameFlags  |= GameFlags::HasFakePings;
+            }
          }
          else {
             m_gameFlags |= GameFlags::Legacy;
 
             // clear modern flag just in case
             m_gameFlags &= ~GameFlags::Modern;
+         }
+
+         // allow to enable hitbox-based aiming on fresh games
+         if (is (GameFlags::Modern)) {
+            m_gameFlags |= GameFlags::HasStudioModels;
          }
 
          if (is (GameFlags::Metamod)) {
@@ -839,6 +964,7 @@ bool Game::loadCSBinary () {
 }
 
 bool Game::postload () {
+   bstor.checkInstallLocation (); // check if installed just as in manual
 
    // register logger
    logger.initialize (bstor.buildPath (BotFile::LogFile), [] (const char *msg) {
@@ -859,14 +985,14 @@ bool Game::postload () {
    // set out user agent for http stuff
    http.setUserAgent (strings.format ("%s/%s", product.name, product.version));
 
-   // startup the sockets on windows
-   http.startup ();
-
    // set the app name
    plat.setAppName (product.name.chars ());
 
    // register bot cvars
    registerCvars ();
+
+   // set custom cvar descriptions after registering them
+   util.setCustomCvarDescriptions ();
 
    // handle prefixes
    static StringArray prefixes = { product.cmdPri, product.cmdSec };
@@ -879,14 +1005,14 @@ bool Game::postload () {
    }
 
    // register fake metamod command handler if we not! under mm
-   if (!(game.is (GameFlags::Metamod))) {
+   if (!(is (GameFlags::Metamod))) {
       game.registerEngineCommand ("meta", [] () {
          game.print ("You're launched standalone version of %s. Metamod is not installed or not enabled!", product.name);
       });
    }
 
    // is 25th anniversary
-   if (game.is25thAnniversaryUpdate ()) {
+   if (is25thAnniversaryUpdate ()) {
       m_gameFlags |= GameFlags::AnniversaryHL25;
    }
 
@@ -896,30 +1022,25 @@ bool Game::postload () {
    // register engine lib handle
    m_engineLib.locate (reinterpret_cast <void *> (engfuncs.pfnPrecacheModel));
 
-   if (plat.android) {
+   if (plat.android || plat.emscripten) {
       m_gameFlags |= (GameFlags::Xash3D | GameFlags::Mobility | GameFlags::HasBotVoice | GameFlags::ReGameDLL);
 
       if (is (GameFlags::Metamod)) {
          return true; // we should stop the attempt for loading the real gamedll, since metamod handle this for us
       }
-      auto gamedll = strings.format ("%s/%s", plat.env ("XASH3D_GAMELIBDIR"), "libserver.so");
-
-      if (!m_gameLib.load (gamedll)) {
-         logger.fatal ("Unable to load gamedll \"%s\". Exiting... (gamedir: %s)", gamedll, getRunningModName ());
-      }
    }
-   else {
-      const bool binaryLoaded = loadCSBinary ();
 
-      if (!binaryLoaded && !is (GameFlags::Metamod)) {
-         logger.fatal ("Mod that you has started, not supported by this bot (gamedir: %s)", getRunningModName ());
-      }
+   const bool binaryLoaded = loadCSBinary ();
 
-      if (is (GameFlags::Metamod)) {
-         m_gameLib.unload ();
-         return true;
-      }
+   if (!binaryLoaded && !is (GameFlags::Metamod)) {
+      logger.fatal ("Mod that you has started, not supported by this bot (gamedir: %s)", getRunningModName ());
    }
+
+   if (is (GameFlags::Metamod)) {
+      m_gameLib.unload ();
+      return true;
+   }
+
    return false;
 }
 
@@ -951,7 +1072,11 @@ void Game::applyGameModes () {
       return;
    }
 
-   static ConVarRef csdm_active ("csdm_active");
+   static StringRef csdmActiveCvarName = conf.fetchCustom ("CSDMDetectCvar");
+   static StringRef zmActiveCvarName = conf.fetchCustom ("ZMDetectCvar");
+   static StringRef zmDelayCvarName = conf.fetchCustom ("ZMDelayCvar");
+
+   static ConVarRef csdm_active (csdmActiveCvarName);
    static ConVarRef csdm_version ("csdm_version");
    static ConVarRef redm_active ("redm_active");
    static ConVarRef mp_freeforall ("mp_freeforall");
@@ -976,12 +1101,21 @@ void Game::applyGameModes () {
       }
    }
 
-   // some little support for zombie plague
-   static ConVarRef zp_delay ("zp_delay");
+   // does zombie mod is in use
+   static ConVarRef zm_active (zmActiveCvarName);
 
-   // update our ignore timer if zp_elay exists
-   if (zp_delay.exists () && zp_delay.value () > 0.0f) {
-      cv_ignore_enemies_after_spawn_time.set (zp_delay.value () + 3.0f);
+   // do a some little support for zombie plague
+   if (zm_active.exists ()) {
+      static ConVarRef zm_delay (zmDelayCvarName);
+
+      // update our ignore timer if zp_delay exists
+      if (zm_delay.exists () && zm_delay.value () > 0.0f) {
+         cv_ignore_enemies_after_spawn_time.set (zm_delay.value () + 3.5f);
+      }
+      m_gameFlags |= GameFlags::ZombieMod;
+   }
+   else {
+      m_gameFlags &= ~GameFlags::ZombieMod;
    }
 }
 
@@ -994,8 +1128,11 @@ void Game::slowFrame () {
       // refresh bomb origin in case some plugin moved it out
       graph.setBombOrigin ();
 
-      // update client pings
-      util.calculatePings ();
+      // ensure the server admin is confident about features he's using
+      ensureHealthyGameEnvironment ();
+
+      // maintain round restart for first human join
+      bots.maintainRoundRestart ();
 
       // update next update time
       m_halfSecondFrame = nextUpdate * 0.25f + time ();
@@ -1033,6 +1170,12 @@ void Game::slowFrame () {
    // kick failed bots
    bots.checkNeedsToBeKicked ();
 
+   // refresh bot infection (creature) status
+   bots.refreshCreatureStatus ();
+
+   // update client pings
+   fakeping.calculate ();
+
    // update next update time
    m_oneSecondFrame = nextUpdate + time ();
 }
@@ -1040,7 +1183,7 @@ void Game::slowFrame () {
 void Game::searchEntities (StringRef field, StringRef value, EntitySearch functor) {
    edict_t *ent = nullptr;
 
-   while (!game.isNullEntity (ent = engfuncs.pfnFindEntityByString (ent, field.chars (), value.chars ()))) {
+   while (!isNullEntity (ent = engfuncs.pfnFindEntityByString (ent, field.chars (), value.chars ()))) {
       if ((ent->v.flags & EF_NODRAW) || (ent->v.flags & FL_CLIENT)) {
          continue;
       }
@@ -1051,11 +1194,11 @@ void Game::searchEntities (StringRef field, StringRef value, EntitySearch functo
    }
 }
 
-void Game::searchEntities (const Vector &position, float radius, EntitySearch functor) {
+void Game::searchEntities (const Vector &position, float radius, EntitySearch functor) const {
    edict_t *ent = nullptr;
    const Vector &pos = position.empty () ? m_startEntity->v.origin : position;
 
-   while (!game.isNullEntity (ent = engfuncs.pfnFindEntityInSphere (ent, pos, radius))) {
+   while (!isNullEntity (ent = engfuncs.pfnFindEntityInSphere (ent, pos, radius))) {
       if ((ent->v.flags & EF_NODRAW) || (ent->v.flags & FL_CLIENT)) {
          continue;
       }
@@ -1070,9 +1213,9 @@ bool Game::hasEntityInGame (StringRef classname) {
    return !isNullEntity (engfuncs.pfnFindEntityByString (nullptr, "classname", classname.chars ()));
 }
 
-void Game::printBotVersion () {
-   String gameVersionStr;
-   StringArray botRuntimeFlags;
+void Game::printBotVersion () const {
+   String gameVersionStr {};
+   StringArray botRuntimeFlags {};
 
    if (is (GameFlags::Legacy)) {
       gameVersionStr.assign ("Legacy");
@@ -1085,7 +1228,12 @@ void Game::printBotVersion () {
    }
 
    if (is (GameFlags::Xash3D)) {
-      gameVersionStr.append (" @ Xash3D Engine");
+      if (is (GameFlags::Xash3DLegacy)) {
+         gameVersionStr.append (" @ Xash3D-NG");
+      }
+      else {
+         gameVersionStr.append (" @ Xash3D FWGS");
+      }
 
       if (is (GameFlags::Mobility)) {
          gameVersionStr.append (" Mobile");
@@ -1113,8 +1261,12 @@ void Game::printBotVersion () {
       botRuntimeFlags.push ("HL25");
    }
 
+   if (botRuntimeFlags.empty ()) {
+      botRuntimeFlags.push ("None");
+   }
+
    // print if we're using sse 4.x instructions
-   if (cpuflags.sse41 || cpuflags.sse42 || cpuflags.neon) {
+   if (plat.simd && (cpuflags.sse41 || cpuflags.sse42 || cpuflags.neon)) {
       Array <String> simdLevels {};
 
       if (cpuflags.sse41) {
@@ -1129,6 +1281,90 @@ void Game::printBotVersion () {
       botRuntimeFlags.push (strings.format ("SIMD: %s", String::join (simdLevels, " & ")));
    }
    ctrl.msg ("\n%s v%s successfully loaded for game: Counter-Strike %s.\n\tFlags: %s.\n", product.name, product.version, gameVersionStr, botRuntimeFlags.empty () ? "None" : String::join (botRuntimeFlags, ", "));
+}
+
+void Game::ensureHealthyGameEnvironment () {
+   const bool dedicated = isDedicated ();
+
+   if (!dedicated || is (GameFlags::Legacy | GameFlags::Xash3D)) {
+      if (!dedicated) {
+
+         // force enable pings on listen servers if disabled at all
+         if (is (GameFlags::Modern) && cv_show_latency.as <int> () == 0) {
+            cv_show_latency.set (2);
+         }
+      }
+      return; // listen servers doesn't care about it at all
+   }
+
+   // magic string that's enables the features
+   constexpr auto kAllowHash = StringRef::fnv1a32 ("i'm confident for what i'm doing");
+   constexpr auto kAllowHash2 = StringRef::fnv1a32 ("\"i'm confident for what i'm doing\"");
+
+   // fetch custom variable, so fake features are explicitly enabled
+   static auto enableFakeFeatures = StringRef::fnv1a32 (conf.fetchCustom ("EnableFakeBotFeatures").chars ());
+
+   // if string matches, do not affect the cvars
+   if (enableFakeFeatures == kAllowHash || enableFakeFeatures == kAllowHash2) {
+      return;
+   }
+
+   auto notifyPeacefulRevert = [] (const ConVar &cv) {
+      game.print ("Cvar \"%s\" reverted to peaceful value.", cv.name ());
+   };
+
+   // disable fake latency
+   if (cv_show_latency.as <int> () > 1) {
+      cv_show_latency.set (0);
+
+      notifyPeacefulRevert (cv_show_latency);
+   }
+
+   // disable fake avatars
+   if (cv_show_avatars) {
+      cv_show_avatars.set (0);
+
+      notifyPeacefulRevert (cv_show_avatars);
+   }
+
+   // disable fake queries 
+   if (cv_enable_query_hook) {
+      cv_enable_query_hook.set (0);
+
+      notifyPeacefulRevert (cv_enable_query_hook);
+   }
+}
+
+edict_t *Game::createFakeClient (StringRef name) {
+   auto ent = engfuncs.pfnCreateFakeClient (name.chars ());
+
+   if (isNullEntity (ent)) {
+      return nullptr;
+   }
+   auto netname = ent->v.netname;
+   ent->v = {}; // reset entire the entvars structure (fix from regamedll)
+
+   // restore containing entity, name and client flags
+   ent->v.pContainingEntity = ent;
+   ent->v.flags = FL_FAKECLIENT | FL_CLIENT;
+   ent->v.netname = netname;
+
+   if (ent->pvPrivateData != nullptr) {
+      engfuncs.pfnFreeEntPrivateData (ent);
+   }
+   ent->pvPrivateData = nullptr;
+
+   return ent;
+}
+
+void Game::markBreakableAsInvalid (edict_t *ent) {
+   m_checkedBreakables[indexOfEntity (ent)] = false;
+}
+
+bool Game::isDeveloperMode () const {
+   static ConVarRef developer { "developer" };
+
+   return developer.exists () && developer.value () > 0.0f;
 }
 
 void LightMeasure::initializeLightstyles () {
@@ -1157,7 +1393,7 @@ void LightMeasure::animateLight () {
 
    for (auto j = 0; j < MAX_LIGHTSTYLES; ++j) {
       if (!m_lightstyle[j].length) {
-         m_lightstyleValue[j] = 256;
+         m_lightstyleValue[j] = MAX_LIGHTSTYLEVALUE;
          continue;
       }
       m_lightstyleValue[j] = static_cast <uint32_t> (m_lightstyle[j].map[index % m_lightstyle[j].length] - 'a') * 22u;
@@ -1262,7 +1498,7 @@ template <typename S, typename M> bool LightMeasure::recursiveLightPoint (const 
 
       // compute the lightmap color at a particular point
       for (int maps = 0; maps < MAX_LIGHTMAPS && surf->styles[maps] != 255; ++maps) {
-         const uint32_t scale = m_lightstyleValue[surf->styles[maps]];
+         const auto scale = static_cast <int32_t> (m_lightstyleValue[surf->styles[maps]]);
 
          m_point.red += lightmap->r * scale;
          m_point.green += lightmap->g * scale;
@@ -1308,9 +1544,136 @@ float LightMeasure::getLightLevel (const Vector &point) {
       }
       return recursiveLightPoint <msurface_t, mnode_t> (m_worldModel->nodes, point, endPoint);
    };
+
    return !recursiveCheck () ? kInvalidLightLevel : 100 * cr::sqrtf (cr::min (75.0f, static_cast <float> (m_point.avg ())) / 75.0f);
 }
 
 float LightMeasure::getSkyColor () {
    return static_cast <float> (Color (sv_skycolor_r.as <int> (), sv_skycolor_g.as <int> (), sv_skycolor_b.as <int> ()).avg ());
+}
+
+Vector PlayerHitboxEnumerator::get (edict_t *ent, int part, float updateTimestamp) {
+   auto parts = &m_parts[game.indexOfEntity (ent) % kGameMaxPlayers];
+
+   if (game.time () > parts->updated) {
+      update (ent);
+      parts->updated = game.time () + updateTimestamp;
+   }
+
+   switch (part) {
+   default:
+   case PlayerPart::Head:
+      return parts->head;
+
+   case PlayerPart::Stomach:
+      return parts->stomach;
+
+   case PlayerPart::LeftArm:
+      return parts->left;
+
+   case PlayerPart::RightArm:
+      return parts->right;
+
+   case PlayerPart::Feet:
+      return parts->feet;
+
+   case PlayerPart::RightLeg:
+      return { parts->right.x, parts->right.y, parts->feet.z };
+
+   case PlayerPart::LeftLeg:
+      return { parts->left.x, parts->left.y, parts->feet.z };
+   }
+}
+
+void PlayerHitboxEnumerator::update (edict_t *ent) {
+   constexpr auto kInvalidHitbox = -1;
+
+   if (!util.isAlive (ent)) {
+      return;
+   }
+   // get info about player
+   auto parts = &m_parts[game.indexOfEntity (ent) % kGameMaxPlayers];
+
+   // set the feet without bones
+   parts->feet = ent->v.origin;
+
+   constexpr auto kStandFeet = 34.0f;
+   constexpr auto kCrouchFeet = 14.0f;
+
+   // legs position isn't calculated to reduce cpu usage, just use some universal feet spot
+   if (ent->v.flags & FL_DUCKING) {
+      parts->feet.z = ent->v.origin.z - kCrouchFeet;
+   }
+   else {
+      parts->feet.z = ent->v.origin.z - kStandFeet;
+   }
+
+   auto getHitbox = [&] (studiohdr_t *hdr, mstudiobbox_t *bb, int part) {
+      int hitbox = kInvalidHitbox;
+
+      for (auto i = 0; i < hdr->numhitboxes; ++i) {
+         const auto set = &bb[i];
+
+         if (set->group != part) {
+            continue;
+         }
+         hitbox = i;
+         break;
+      }
+      return hitbox;
+   };
+   auto model = engfuncs.pfnGetModelPtr (ent);
+   auto studiohdr = reinterpret_cast <studiohdr_t *> (model);
+
+   // this can be null ?
+   if (model && studiohdr) {
+      auto bboxset = reinterpret_cast <mstudiobbox_t *> (reinterpret_cast <uint8_t *> (studiohdr) + studiohdr->hitboxindex);
+
+      // get the head
+      auto hitbox = getHitbox (studiohdr, bboxset, PlayerPart::Head);
+
+      if (hitbox != kInvalidHitbox) {
+         engfuncs.pfnGetBonePosition (ent, bboxset[hitbox].bone, parts->head, nullptr);
+
+         parts->head.z += bboxset[hitbox].bbmax.z;
+         parts->head = { ent->v.origin.x, ent->v.origin.y, parts->head.z };
+      }
+
+      // get the body (stomach)
+      hitbox = getHitbox (studiohdr, bboxset, PlayerPart::Stomach);
+
+      if (hitbox != kInvalidHitbox) {
+         engfuncs.pfnGetBonePosition (ent, bboxset[hitbox].bone, parts->stomach, nullptr);
+      }
+
+      // get the left (arm)
+      hitbox = getHitbox (studiohdr, bboxset, PlayerPart::LeftArm);
+
+      if (hitbox != kInvalidHitbox) {
+         engfuncs.pfnGetBonePosition (ent, bboxset[hitbox].bone, parts->left, nullptr);
+      }
+
+      // get the right (arm)
+      hitbox = getHitbox (studiohdr, bboxset, PlayerPart::RightArm);
+
+      if (hitbox != kInvalidHitbox) {
+         engfuncs.pfnGetBonePosition (ent, bboxset[hitbox].bone, parts->right, nullptr);
+      }
+      return;
+   }
+   else {
+      game.clearGameFlag (GameFlags::HasStudioModels); // yes, only a single fail will disable this
+   }
+
+   parts->head = ent->v.origin + ent->v.view_ofs;
+   parts->stomach = ent->v.origin;
+
+   parts->left = parts->head;
+   parts->right = parts->head;
+}
+
+void PlayerHitboxEnumerator::reset () {
+   for (auto &part : m_parts) {
+      part = {};
+   }
 }

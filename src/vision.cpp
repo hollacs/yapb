@@ -7,13 +7,13 @@
 
 #include <yapb.h>
 
-ConVar cv_max_nodes_for_predict ("max_nodes_for_predict", "25", "Maximum number for path length, to predict the enemy.", true, 15.0f, 256.0f);
+ConVar cv_max_nodes_for_predict ("max_nodes_for_predict", "22", "Maximum number of path nodes to predict the enemy.", true, 15.0f, 256.0f);
 ConVar cv_whose_your_daddy ("whose_your_daddy", "0", "Enables or disables extra hard difficulty for bots.");
 
 // game console variables
 ConVar mp_flashlight ("mp_flashlight", nullptr, Var::GameRef);
 
-float Bot::isInFOV (const Vector &destination) {
+float Bot::isInFOV (const Vector &destination) const {
    const float entityAngle = cr::wrapAngle360 (destination.yaw ()); // find yaw angle from source to destination...
    const float viewAngle = cr::wrapAngle360 (pev->v_angle.y); // get bot's current view angle...
 
@@ -285,8 +285,7 @@ void Bot::updateLookAnglesNewbie (const Vector &direction, float delta) {
    const float noTargetRatio = 0.3f;
    const float offsetDelay = 1.2f;
 
-   Vector stiffness;
-   Vector randomize;
+   Vector stiffness {};
 
    m_idealAngles = direction.get2d ();
    m_idealAngles.clampAngles ();
@@ -302,6 +301,8 @@ void Bot::updateLookAnglesNewbie (const Vector &direction, float delta) {
       if (m_randomizeAnglesTime < game.time ()
          && ((pev->velocity.length () > 1.0f
             && m_angularDeviation.length () < 5.0f) || m_angularDeviation.length () < 1.0f)) {
+
+         Vector randomize {};
 
          // is the bot standing still ?
          if (pev->velocity.length () < 1.0f) {
@@ -360,28 +361,33 @@ bool Frustum::isObjectInsidePlane (const Plane &plane, const Vector &center, flo
       return plane.result + (plane.normal | point) >= 0.0f;
    };
 
-   const Vector &test = plane.normal.get2d ();
-   const Vector &top = center + Vector (0.0f, 0.0f, height * 0.5f) + test * radius;
-   const Vector &bottom = center - Vector (0.0f, 0.0f, height * 0.5f) + test * radius;
+   const auto &test = plane.normal.get2d ();
+   const auto &top = center + Vector (0.0f, 0.0f, height * 0.5f) + test * radius;
+   const auto &bottom = center - Vector (0.0f, 0.0f, height * 0.5f) + test * radius;
 
    return isPointInsidePlane (top) || isPointInsidePlane (bottom);
 }
 
-void Frustum::calculate (Planes &planes, const Vector &viewAngle, const Vector &viewOffset) {
-   Vector forward, right, up;
+void Frustum::calculate (Planes &planes, const Vector &viewAngle, const Vector &viewOffset) const {
+   Vector forward {}, right {}, up {};
    viewAngle.angleVectors (&forward, &right, &up);
 
    auto fc = viewOffset + forward * kMaxViewDistance;
    auto nc = viewOffset + forward * kMinViewDistance;
 
-   auto fbl = fc + (up * m_farHeight * 0.5f) - (right * m_farWidth * 0.5f);
-   auto fbr = fc + (up * m_farHeight * 0.5f) + (right * m_farWidth * 0.5f);
-   auto ftl = fc - (up * m_farHeight * 0.5f) - (right * m_farWidth * 0.5f);
-   auto ftr = fc - (up * m_farHeight * 0.5f) + (right * m_farWidth * 0.5f);
-   auto nbl = nc + (up * m_nearHeight * 0.5f) - (right * m_nearWidth * 0.5f);
-   auto nbr = nc + (up * m_nearHeight * 0.5f) + (right * m_nearWidth * 0.5f);
-   auto ntl = nc - (up * m_nearHeight * 0.5f) - (right * m_nearWidth * 0.5f);
-   auto ntr = nc - (up * m_nearHeight * 0.5f) + (right * m_nearWidth * 0.5f);
+   auto up_half_far = up * m_farHeight * 0.5f;
+   auto right_half_far = right * m_farWidth * 0.5f;
+   auto up_half_near = up * m_nearHeight * 0.5f;
+   auto right_half_near = right * m_nearWidth * 0.5f;
+
+   auto fbl = fc - right_half_far + up_half_far;
+   auto fbr = fc + right_half_far + up_half_far;
+   auto ftl = fc - right_half_far - up_half_far;
+   auto ftr = fc + right_half_far - up_half_far;
+   auto nbl = nc - right_half_near + up_half_near;
+   auto nbr = nc + right_half_near + up_half_near;
+   auto ntl = nc - right_half_near - up_half_near;
+   auto ntr = nc + right_half_near - up_half_near;
 
    auto setPlane = [&] (PlaneSide side, const Vector &v1, const Vector &v2, const Vector &v3) {
       auto &plane = planes[static_cast <int> (side)];
@@ -402,7 +408,7 @@ void Frustum::calculate (Planes &planes, const Vector &viewAngle, const Vector &
 
 bool Frustum::check (const Planes &planes, edict_t *ent) const {
    constexpr auto kOffset = Vector (0.0f, 0.0f, 5.0f);
-   const Vector &origin = ent->v.origin - kOffset;
+   const auto &origin = ent->v.origin - kOffset;
 
    for (const auto &plane : planes) {
       if (!isObjectInsidePlane (plane, origin, 60.0f, 16.0f)) {
@@ -419,19 +425,28 @@ void Bot::setAimDirection () {
    if (!(flags & (AimFlags::Grenade | AimFlags::Enemy | AimFlags::Entity))) {
 
       // check if narrow place and we're duck, do not predict enemies in that situation
-      const bool duckedInNarrowPlace = isInNarrowPlace () && ((m_pathFlags & NodeFlag::Crouch) || (pev->button & IN_DUCK));
+      const bool duckedInNarrowPlace = isInNarrowPlace ()
+         && ((m_pathFlags & NodeFlag::Crouch)
+            || (pev->button & IN_DUCK));
 
-      if (duckedInNarrowPlace || isOnLadder () || isInWater () || (m_pathFlags & NodeFlag::Ladder) || (m_currentTravelFlags & PathFlag::Jump)) {
+      if (duckedInNarrowPlace
+         || isOnLadder ()
+         || isInWater ()
+         || (m_pathFlags & NodeFlag::Ladder)
+         || (m_currentTravelFlags & PathFlag::Jump)) {
+
          flags &= ~(AimFlags::LastEnemy | AimFlags::PredictPath);
          m_canChooseAimDirection = false;
       }
 
       // don't switch view right away after loosing focus with current enemy 
-      if ((m_shootTime + 1.5f > game.time () || m_seeEnemyTime + 1.5 > game.time ())
+      if ((m_shootTime + rg (0.75f, 1.25f) > game.time ()
+         || m_seeEnemyTime + rg (1.0f, 1.25f) > game.time ())
+
          && m_forgetLastVictimTimer.elapsed ()
          && !m_lastEnemyOrigin.empty ()
-         && util.isAlive (m_lastEnemy)
-         && game.isNullEntity (m_enemy)) {
+         && util.isPlayer (m_lastEnemy)
+         && !util.isPlayer (m_enemy)) {
 
          flags |= AimFlags::LastEnemy;
       }
@@ -493,31 +508,48 @@ void Bot::setAimDirection () {
       }
 
       auto doFailPredict = [this] () -> void {
-         if (m_timeNextTracking > game.time ()) {
+         if (m_lastPredictIndex != m_currentNodeIndex && m_timeNextTracking + 0.5f > game.time ()) {
             return; // do not fail instantly
          }
          m_aimFlags &= ~AimFlags::PredictPath;
 
          m_trackingEdict = nullptr;
-         m_lookAtPredict = nullptr;
+         m_lookAtPredict.clear ();
       };
 
       auto pathLength = m_lastPredictLength;
       auto predictNode = m_lastPredictIndex;
 
       auto isPredictedIndexApplicable = [&] () -> bool {
+         if (!graph.exists (predictNode)) {
+            return false;
+         }
+         TraceResult result {};
+         game.testLine (getEyesPos (), graph[predictNode].origin + pev->view_ofs, TraceIgnore::None, ent (), &result);
+
+         if (result.flFraction < 0.5f) {
+            return false;
+         }
+         const float distToPredictNodeSq = graph[predictNode].origin.distanceSq (pev->origin);
+
+         if (distToPredictNodeSq >= cr::sqrf (2048.0f)) {
+            return false;
+         }
+
          if (!vistab.visible (m_currentNodeIndex, predictNode) || !vistab.visible (m_previousNodes[0], predictNode)) {
             predictNode = kInvalidNodeIndex;
             pathLength = kInfiniteDistanceLong;
+
+            return false;
          }
-         return graph.exists (predictNode) && pathLength < cv_max_nodes_for_predict.as <int> ();
+         return isNodeValidForPredict (predictNode) && pathLength < cv_max_nodes_for_predict.as <int> ();
       };
 
       if (changePredictedEnemy) {
          if (isPredictedIndexApplicable ()) {
             m_lookAtPredict = graph[predictNode].origin;
 
-            m_timeNextTracking = game.time () + rg (0.5f, 1.0f);
+            m_timeNextTracking = game.time () + 0.75f;
             m_trackingEdict = m_lastEnemy;
          }
          else {
@@ -540,7 +572,6 @@ void Bot::setAimDirection () {
    else if (flags & AimFlags::Nav) {
       const auto &destOrigin = m_destOrigin + pev->view_ofs;
       m_lookAt = destOrigin;
-
 
       if (m_moveToGoal && m_seeEnemyTime + 4.0f < game.time ()
          && !m_isStuck && !(pev->button & IN_DUCK)
@@ -569,7 +600,12 @@ void Bot::setAimDirection () {
       }
       const bool horizontalMovement = (m_pathFlags & NodeFlag::Ladder) || isOnLadder ();
 
-      if (m_numEnemiesLeft > 0 && m_canChooseAimDirection && m_seeEnemyTime + 4.0f < game.time () && m_currentNodeIndex != kInvalidNodeIndex && !horizontalMovement) {
+      if (m_numEnemiesLeft > 0
+         && m_canChooseAimDirection
+         && m_seeEnemyTime + 4.0f < game.time ()
+         && m_currentNodeIndex != kInvalidNodeIndex
+         && !horizontalMovement) {
+
          const auto dangerIndex = practice.getIndex (m_team, m_currentNodeIndex, m_currentNodeIndex);
 
          if (graph.exists (dangerIndex)
@@ -592,7 +628,10 @@ void Bot::setAimDirection () {
       if (horizontalMovement && m_pathWalk.hasNext ()) {
          const auto &nextPath = graph[m_pathWalk.next ()];
 
-         if ((nextPath.flags & NodeFlag::Ladder) && m_destOrigin.distanceSq (pev->origin) < cr::sqrf (128.0f) && nextPath.origin.z > m_pathOrigin.z + 26.0f) {
+         if ((nextPath.flags & NodeFlag::Ladder)
+            && m_destOrigin.distanceSq (pev->origin) < cr::sqrf (128.0f)
+            && nextPath.origin.z > m_pathOrigin.z + 26.0f) {
+
             m_lookAt = nextPath.origin + pev->view_ofs;
          }
       }
@@ -603,7 +642,10 @@ void Bot::setAimDirection () {
       }
 
       // try to look at last victim for a little, maybe there's some one else
-      if (game.isNullEntity (m_enemy) && m_difficulty >= Difficulty::Normal && !m_forgetLastVictimTimer.elapsed () && !m_lastVictimOrigin.empty ()) {
+      if (game.isNullEntity (m_enemy) && m_difficulty >= Difficulty::Normal
+         && !m_forgetLastVictimTimer.elapsed ()
+         && !m_lastVictimOrigin.empty ()) {
+
          m_lookAt = m_lastVictimOrigin + pev->view_ofs;
       }
    }

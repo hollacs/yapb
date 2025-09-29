@@ -115,13 +115,21 @@ CR_DECLARE_SCOPED_ENUM (CollisionState,
    StrafeRight
 )
 
-// counter-strike team id's
+// counter-strike team id's (internal for bot)
 CR_DECLARE_SCOPED_ENUM (Team,
    Terrorist = 0,
    CT,
    Spectator,
    Unassigned,
    Invalid = -1
+)
+
+// counter-strike team id's (used by gamedll, for reference)
+CR_DECLARE_SCOPED_ENUM (CSTeam,
+   Unassigned = 0,
+   Terrorist,
+   CT,
+   Spectator
 )
 
 // item status for StatusIcon message
@@ -180,11 +188,10 @@ CR_DECLARE_SCOPED_ENUM (Chatter,
    GoingToPlantBomb,
    RescuingHostages,
    GoingToCamp,
-   HeardNoise,
    TeamAttack,
    TeamKill,
    ReportingIn,
-   GuardingDroppedC4,
+   GuardingPlantedC4,
    Camping,
    PlantingBomb,
    DefusingBomb,
@@ -197,10 +204,17 @@ CR_DECLARE_SCOPED_ENUM (Chatter,
    WonTheRound,
    ScaredEmotion,
    HeardTheEnemy,
+   SpottedOneEnemy,
+   SpottedTwoEnemies,
+   SpottedThreeEnemies,
+   TooManyEnemies,
    SniperWarning,
    SniperKilled,
    VIPSpotted,
+   GuardingEscapeZone,
    GuardingVIPSafety,
+   GoingToGuardEscapeZone,
+   GoingToGuardRescueZone,
    GoingToGuardVIPSafety,
    QuickWonRound,
    OneEnemyLeft,
@@ -225,6 +239,7 @@ CR_DECLARE_SCOPED_ENUM (Chatter,
    CoverMe,
    BehindSmoke,
    BombsiteSecured,
+   OnARoll,
    Count
 )
 
@@ -428,16 +443,17 @@ namespace TaskPri {
 constexpr auto kInfiniteDistance = 9999999.0f;
 constexpr auto kInvalidLightLevel = kInfiniteDistance;
 constexpr auto kGrenadeCheckTime = 0.6f;
-constexpr auto kSprayDistance = 360.0f;
+constexpr auto kSprayDistance = 272.0f;
 constexpr auto kSprayDistanceX2 = kSprayDistance * 2;
 constexpr auto kMaxChatterRepeatInterval = 99.0f;
 constexpr auto kViewFrameUpdate = 1.0f / 25.0f;
 constexpr auto kGrenadeDamageRadius = 385.0f;
+constexpr auto kMinMovedDistance = 3.0f;
 
 constexpr auto kInfiniteDistanceLong = static_cast <int> (kInfiniteDistance);
 constexpr auto kMaxWeapons = 32;
 constexpr auto kNumWeapons = 26;
-constexpr auto kMaxCollideMoves = 3;
+constexpr auto kMaxCollideMoves = 4;
 constexpr auto kGameMaxPlayers = 32;
 constexpr auto kGameTeamNum = 2;
 constexpr auto kInvalidNodeIndex = -1;

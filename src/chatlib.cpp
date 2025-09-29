@@ -7,8 +7,8 @@
 
 #include <yapb.h>
 
-ConVar cv_chat ("chat", "1", "Enables or disables bots chat functionality.");
-ConVar cv_chat_percent ("chat_percent", "30", "Bot chances to send random dead chat when killed.", true, 0.0f, 100.0f);
+ConVar cv_chat ("chat", "1", "Enables or disables bot chat functionality.");
+ConVar cv_chat_percent ("chat_percent", "30", "Bot's chance to send random dead chat when killed.", true, 0.0f, 100.0f);
 
 BotChatManager::BotChatManager () {
    m_clanTags = {
@@ -142,7 +142,7 @@ void Bot::prepareChatMessage (StringRef message) {
    m_chatBuffer = message;
 
    // must be called before return or on the end
-   auto finishPreparation = [&] () {
+   auto addChatErrors = [&] () {
       if (!m_chatBuffer.empty ()) {
          chatlib.addChatErrors (m_chatBuffer);
       }
@@ -153,7 +153,7 @@ void Bot::prepareChatMessage (StringRef message) {
 
    // nothing found, bail out
    if (pos == String::InvalidIndex || pos >= message.length ()) {
-      finishPreparation ();
+      addChatErrors ();
       return;
    }
 
@@ -195,20 +195,20 @@ void Bot::prepareChatMessage (StringRef message) {
    auto getRoundTime = [] () -> String {
       auto roundTimeSecs = static_cast <int> (bots.getRoundEndTime () - game.time ());
 
-      String roundTime;
+      String roundTime {};
       roundTime.assignf ("%02d:%02d", cr::clamp (roundTimeSecs / 60, 0, 59), cr::clamp (cr::abs (roundTimeSecs % 60), 0, 59));
 
       return roundTime;
    };
 
    // get bot's victim
-   auto getMyVictim = [&] () -> String {;
-   return humanizedName (game.indexOfPlayer (m_lastVictim));
+   auto getMyVictim = [&] () -> String {
+      return humanizedName (game.indexOfPlayer (m_lastVictim));
    };
 
    // get the game name alias
    auto getGameName = [] () -> String {
-      String gameName;
+      String gameName {};
 
       if (game.is (GameFlags::ConditionZero)) {
          if (rg.chance (30)) {
@@ -235,12 +235,18 @@ void Bot::prepareChatMessage (StringRef message) {
          if (!(client.flags & ClientFlags::Used) || !(client.flags & ClientFlags::Alive) || client.ent == ent ()) {
             continue;
          }
+         const auto playerIndex = game.indexOfPlayer (client.ent);
 
          if (needsEnemy && m_team != client.team) {
-            return humanizedName (game.indexOfPlayer (client.ent));
+            return humanizedName (playerIndex);
          }
          else if (!needsEnemy && m_team == client.team) {
-            return humanizedName (game.indexOfPlayer (client.ent));
+            if (util.isPlayer (pev->dmg_inflictor)
+               && game.getRealTeam (pev->dmg_inflictor) == m_team) {
+
+               return humanizedName (game.indexOfPlayer (pev->dmg_inflictor));
+            }
+            return humanizedName (playerIndex);
          }
       }
       return getHighfragPlayer ();
@@ -248,8 +254,14 @@ void Bot::prepareChatMessage (StringRef message) {
    size_t replaceCounter = 0;
 
    while (replaceCounter < 6 && (pos = m_chatBuffer.find ('%')) != String::InvalidIndex) {
+      const auto replacePosition = pos + 1;
+
+      if (replacePosition > m_chatBuffer.length ()) {
+         continue;
+      }
+
       // found one, let's do replace
-      switch (m_chatBuffer[pos + 1]) {
+      switch (m_chatBuffer[replacePosition]) {
 
          // the highest frag player
       case 'f':
@@ -290,10 +302,14 @@ void Bot::prepareChatMessage (StringRef message) {
       case 'e':
          m_chatBuffer.replace ("%e", getPlayerAlive (true));
          break;
+
+      case 'g':
+         m_chatBuffer.replace ("%g", graph.getAuthor ());
+         break;
       };
       ++replaceCounter;
    }
-   finishPreparation ();
+   addChatErrors ();
 }
 
 bool Bot::checkChatKeywords (String &reply) {
@@ -308,7 +324,7 @@ bool Bot::isReplyingToChat () {
    if (m_sayTextBuffer.entityIndex != -1 && !m_sayTextBuffer.sayText.empty ()) {
       // check is time to chat is good
       if (m_sayTextBuffer.timeNextChat < game.time () + rg (m_sayTextBuffer.chatDelay / 2, m_sayTextBuffer.chatDelay)) {
-         String replyText;
+         String replyText {};
 
          if (rg.chance (m_sayTextBuffer.chatProbability + rg (40, 70)) && checkChatKeywords (replyText)) {
             prepareChatMessage (replyText);
@@ -374,8 +390,95 @@ void Bot::checkForChat () {
 void Bot::sendToChat (StringRef message, bool teamOnly) {
    // this function prints saytext message to all players
 
-   if (message.empty () || !cv_chat) {
+   if (m_isCreature || message.empty () || !cv_chat) {
       return;
    }
-   issueCommand ("%s \"%s\"", teamOnly ? "say_team" : "say", message);
+
+   // special handling for legacy games
+   if (game.is (GameFlags::Legacy)) {
+      sendToChatLegacy (message, teamOnly);
+   }
+   else {
+      issueCommand ("%s \"%s\"", teamOnly ? "say_team" : "say", message);
+   }
+}
+
+void Bot::sendToChatLegacy (StringRef message, bool teamOnly) {
+   // this function prints saytext message to all players for legacy games (< cs 1.6)
+
+   // note: for some reason using regular say & say_team for sending chat messages on hlds on a legacy games
+   // causes buffer overruns somewhere in gamedll Host_Say function, thus crashing the game randomly.
+   // so this function mimics what legacy gamedll is doing in their Host_Say.
+
+   bool dedicatedSend = false;
+
+   auto sendChatMsg = [&] (const Client &client, String chatMsg) {
+      if (game.isDedicated () && !dedicatedSend) {
+         dedicatedSend = true;
+
+         game.print ("%s", chatMsg.trim ());
+      }
+      auto rcv = bots[client.ent];
+
+      if (rcv != nullptr) {
+         rcv->m_sayTextBuffer.entityIndex = m_index;
+
+         rcv->m_sayTextBuffer.sayText = message;
+         rcv->m_sayTextBuffer.timeNextChat = game.time () + rcv->m_sayTextBuffer.chatDelay;
+      }
+      else {
+         return; // do not send to controlled bots
+      }
+
+      if (((client.flags & ClientFlags::Alive) && m_isAlive)
+         || (!(client.flags & ClientFlags::Alive) && m_isAlive)
+         || (!(client.flags & ClientFlags::Alive) && !m_isAlive)) {
+
+         MessageWriter (MSG_ONE, msgs.id (NetMsg::SayText), nullptr, client.ent)
+            .writeByte (m_index)
+            .writeString (chatMsg.chars ());
+      }
+   };
+
+   if (teamOnly) {
+      StringRef teamName {};
+
+      if (m_team == Team::Terrorist) {
+         teamName = "(Terrorist)";
+      }
+      else if (m_team == Team::CT) {
+         teamName = "(Counter-Terrorist)";
+      }
+
+      for (const auto &client : util.getClients ()) {
+         if (!(client.flags & ClientFlags::Used) || client.team2 != m_team || client.ent == ent ()) {
+            continue;
+         }
+         String chatMsg {};
+
+         if (m_isAlive) {
+            chatMsg.appendf ("%c%s %c%s%c :  %s\n", 0x01, teamName, 0x03, pev->netname.chars (), 0x01, message);
+         }
+         else {
+            chatMsg.appendf ("%c*DEAD*%s %c%s%c :  %s\n", 0x01, teamName, 0x03, pev->netname.chars (), 0x01, message);
+         }
+         sendChatMsg (client, chatMsg);
+      }
+      return;
+   }
+
+   for (const auto &client : util.getClients ()) {
+      if (!(client.flags & ClientFlags::Used) || client.ent == ent ()) {
+         continue;
+      }
+      String chatMsg {};
+
+      if (m_isAlive) {
+         chatMsg.appendf ("%c%s :  %s\n", 0x02, pev->netname.chars (), message);
+      }
+      else {
+         chatMsg.appendf ("%c*DEAD* %c%s%c :  %s\n", 0x01, 0x03, pev->netname.chars (), 0x01, message);
+      }
+      sendChatMsg (client, chatMsg);
+   }
 }

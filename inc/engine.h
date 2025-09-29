@@ -47,7 +47,9 @@ CR_DECLARE_SCOPED_ENUM (GameFlags,
    HasFakePings = cr::bit (10), // on that game version we can fake bots pings
    HasBotVoice = cr::bit (11), // on that game version we can use chatter
    AnniversaryHL25 = cr::bit (12), // half-life 25th anniversary engine
-   Xash3DLegacy = cr::bit (13) // old xash3d-branch
+   Xash3DLegacy = cr::bit (13), // old xash3d-branch
+   ZombieMod = cr::bit (14), // zombie mod is active
+   HasStudioModels = cr::bit (15) // game supports studio models, so we can use hitbox-based aiming
 )
 
 // defines map type
@@ -69,18 +71,30 @@ CR_DECLARE_SCOPED_ENUM (EntitySearchResult,
    Break
 )
 
+// player body parts
+CR_DECLARE_SCOPED_ENUM (PlayerPart,
+   Head = 1,
+   Chest,
+   Stomach,
+   LeftArm,
+   RightArm,
+   LeftLeg,
+   RightLeg,
+   Feet // custom!
+)
+
 // variable reg pair
 struct ConVarReg {
-   cvar_t reg;
-   String info;
-   String init;
-   String regval;
-   String name;
-   class ConVar *self;
-   float initial, min, max;
-   bool missing;
-   bool bounded;
-   int32_t type;
+   cvar_t reg {};
+   String info {};
+   String init {};
+   String regval {};
+   String name {};
+   class ConVar *self {};
+   float initial {}, min {}, max {};
+   bool missing {};
+   bool bounded {};
+   int32_t type {};
 };
 
 // entity prototype
@@ -111,6 +125,29 @@ public:
    }
 };
 
+// player model part info enumerator
+class PlayerHitboxEnumerator final {
+public:
+   struct Info {
+      float updated {};
+      Vector head {};
+      Vector stomach {};
+      Vector feet {};
+      Vector right {};
+      Vector left {};
+   } m_parts[kGameMaxPlayers] {};
+
+public:
+   // get's the enemy part based on bone info
+   Vector get (edict_t *ent, int part, float updateTimestamp);
+
+   // update bones positions for given player
+   void update (edict_t *ent);
+
+   // reset all the poisitons
+   void reset ();
+};
+
 // provides utility functions to not call original engine (less call-cost)
 class Game final : public Singleton <Game> {
 public:
@@ -127,6 +164,8 @@ private:
    edict_t *m_localEntity {};
 
    Array <edict_t *> m_breakables {};
+   HashMap <int32_t, bool> m_checkedBreakables {};
+
    SmallArray <ConVarReg> m_cvars {};
    SharedLibrary m_gameLib {};
    SharedLibrary m_engineLib {};
@@ -155,7 +194,7 @@ public:
    void levelShutdown ();
 
    // display world line
-   void drawLine (edict_t *ent, const Vector &start, const Vector &end, int width, int noise, const Color &color, int brightness, int speed, int life, DrawLine type = DrawLine::Simple);
+   void drawLine (edict_t *ent, const Vector &start, const Vector &end, int width, int noise, const Color &color, int brightness, int speed, int life, DrawLine type = DrawLine::Simple) const;
 
    // test line
    void testLine (const Vector &start, const Vector &end, int ignoreFlags, edict_t *ignoreEntity, TraceResult *ptr);
@@ -193,6 +232,9 @@ public:
    // check the cvar bounds
    void checkCvarsBounds ();
 
+   // modify cvar description
+   void setCvarDescription (const ConVar &cv, StringRef info);
+
    // sends local registration stack for engine registration
    void registerCvars (bool gameVars = false);
 
@@ -204,6 +246,8 @@ public:
 
    // load the cs binary in non metamod mode
    bool loadCSBinary ();
+
+   void constructCSBinaryName (StringArray &libs);
 
    // do post-load stuff
    bool postload ();
@@ -218,13 +262,25 @@ public:
    void searchEntities (StringRef field, StringRef value, EntitySearch functor);
 
    // search entities in sphere
-   void searchEntities (const Vector &position, float radius, EntitySearch functor);
+   void searchEntities (const Vector &position, float radius, EntitySearch functor) const;
 
    // check if map has entity
    bool hasEntityInGame (StringRef classname);
 
    // print the version to server console on startup
-   void printBotVersion ();
+   void printBotVersion () const;
+
+   // ensure prosperous gaming environment as per: https://github.com/yapb/yapb/issues/575
+   void ensureHealthyGameEnvironment ();
+
+   // creates a fake client's a nd resets all the entvars
+   edict_t *createFakeClient (StringRef name);
+
+   // mark breakable entity as invalid
+   void markBreakableAsInvalid (edict_t *ent);
+
+   // is developer mode ?
+   bool isDeveloperMode () const;
 
    // public inlines
 public:
@@ -262,27 +318,27 @@ public:
    }
 
    // gets edict pointer out of entity index
-   edict_t *entityOfIndex (const int index) {
+   CR_FORCE_INLINE edict_t *entityOfIndex (const int index) const {
       return static_cast <edict_t *> (m_startEntity + index);
    };
 
    // gets edict pointer out of entity index (player)
-   edict_t *playerOfIndex (const int index) {
+   CR_FORCE_INLINE edict_t *playerOfIndex (const int index) const {
       return entityOfIndex (index) + 1;
    };
 
    // gets edict index out of it's pointer
-   int indexOfEntity (const edict_t *ent) {
+   CR_FORCE_INLINE int indexOfEntity (const edict_t *ent) const {
       return static_cast <int> (ent - m_startEntity);
    };
 
    // gets edict index of it's pointer (player)
-   int indexOfPlayer (const edict_t *ent) {
+   CR_FORCE_INLINE int indexOfPlayer (const edict_t *ent) const {
       return indexOfEntity (ent) - 1;
    }
 
    // verify entity isn't null
-   bool isNullEntity (const edict_t *ent) {
+   CR_FORCE_INLINE bool isNullEntity (const edict_t *ent) const {
       return !ent || !indexOfEntity (ent) || ent->free;
    }
 
@@ -297,7 +353,7 @@ public:
    }
 
    // gets the player team
-   int getTeam (edict_t *ent) {
+   int getTeam (edict_t *ent) const {
       if (isNullEntity (ent)) {
          return Team::Unassigned;
       }
@@ -305,14 +361,19 @@ public:
    }
 
    // gets the player team (real in ffa)
-   int getRealTeam (edict_t *ent) {
+   int getRealTeam (edict_t *ent) const {
       if (isNullEntity (ent)) {
          return Team::Unassigned;
       }
       return util.getClient (indexOfPlayer (ent)).team2;
    }
 
-   // sets the precache to uninitialize
+   // get real gamedll team (matches gamedll indices)
+   int getGameTeam (edict_t *ent) const {
+      return getRealTeam (ent) + 1;
+   }
+
+   // sets the precache to uninitialized
    void setUnprecached () {
       m_precached = false;
    }
@@ -334,7 +395,7 @@ public:
    bool checkVisibility (edict_t *ent, uint8_t *set);
 
    // get pvs/pas visibility set
-   uint8_t *getVisibilitySet (Bot *bot, bool pvs);
+   uint8_t *getVisibilitySet (Bot *bot, bool pvs) const;
 
    // what kind of game engine / game dll / mod / tool we're running ?
    bool is (const int type) const {
@@ -344,6 +405,11 @@ public:
    // adds game flag
    void addGameFlag (const int type) {
       m_gameFlags |= type;
+   }
+
+   // clears game flag
+   void clearGameFlag (const int type) {
+      m_gameFlags &= ~type;
    }
 
    // gets the map type
@@ -374,6 +440,11 @@ public:
    // map has breakables ?
    bool hasBreakables () const {
       return !m_breakables.empty ();
+   }
+
+   // is breakable entity is valid ?
+   bool isBreakableValid (edict_t *ent) {
+      return m_checkedBreakables[indexOfEntity (ent)];
    }
 
    // find variable value by variable name

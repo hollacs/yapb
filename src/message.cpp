@@ -255,11 +255,20 @@ void MessageDispatcher::netMsgStatusIcon () {
       // try to equip in buyzone
       m_bot->enteredBuyZone (BuyState::PrimaryWeapon);
    }
+   else if (cached & StatusIconCache::Escape) {
+      m_bot->m_inEscapeZone = (m_args[enabled].long_ != 0);
+   }
+   else if (cached & StatusIconCache::Rescue) {
+      m_bot->m_inRescueZone = (m_args[enabled].long_ != 0);
+   }
    else if (cached & StatusIconCache::VipSafety) {
       m_bot->m_inVIPZone = (m_args[enabled].long_ != 0);
    }
    else if (cached & StatusIconCache::C4) {
       m_bot->m_inBombZone = (m_args[enabled].long_ == 2);
+   }
+   else if (cached & StatusIconCache::Defuser) {
+      m_bot->m_hasDefuser = (m_args[enabled].long_ != 0);
    }
 }
 
@@ -344,6 +353,7 @@ void MessageDispatcher::netMsgScoreInfo () {
    // if we're have bot, set the kd ratio
    if (bot != nullptr) {
       bot->m_kpdRatio = bot->pev->frags / cr::max (static_cast <float> (m_args[deaths].long_), 1.0f);
+      bot->m_deathCount = m_args[deaths].long_;
    }
 }
 
@@ -421,6 +431,13 @@ void MessageDispatcher::netMsgFlashBat () {
    m_bot->m_flashLevel = m_args[value].long_;
 }
 
+void MessageDispatcher::netMsgResetHUD () {
+   if (m_bot) {
+      m_bot->spawned ();
+   }
+   bots.setResetHUD (true);
+}
+
 MessageDispatcher::MessageDispatcher () {
 
    // register wanted message
@@ -451,10 +468,12 @@ MessageDispatcher::MessageDispatcher () {
    addWanted ("FlashBat", NetMsg::FlashBat, &MessageDispatcher::netMsgFlashBat);
    addWanted ("ScoreInfo", NetMsg::ScoreInfo, &MessageDispatcher::netMsgScoreInfo);
    addWanted ("ScoreAttrib", NetMsg::ScoreAttrib, &MessageDispatcher::netMsgScoreAttrib);
+   addWanted ("ResetHUD", NetMsg::ResetHUD, &MessageDispatcher::netMsgResetHUD);
 
    // we're need next messages IDs but we're won't handle them, so they will be removed from wanted list as soon as they get engine IDs
    addWanted ("BotVoice", NetMsg::BotVoice, nullptr);
    addWanted ("SendAudio", NetMsg::SendAudio, nullptr);
+   addWanted ("SayText", NetMsg::SayText, nullptr);
 
    // register text msg cache
    m_textMsgCache["#CTs_Win"] = TextMsgCache::NeedHandle | TextMsgCache::CounterWin;
@@ -491,8 +510,11 @@ MessageDispatcher::MessageDispatcher () {
 
    // register status icon cache
    m_statusIconCache["buyzone"] = StatusIconCache::NeedHandle | StatusIconCache::BuyZone;
+   m_statusIconCache["escape"] = StatusIconCache::NeedHandle | StatusIconCache::Escape;
+   m_statusIconCache["rescue"] = StatusIconCache::NeedHandle | StatusIconCache::Rescue;
    m_statusIconCache["vipsafety"] = StatusIconCache::NeedHandle | StatusIconCache::VipSafety;
    m_statusIconCache["c4"] = StatusIconCache::NeedHandle | StatusIconCache::C4;
+   m_statusIconCache["defuser"] = StatusIconCache::NeedHandle | StatusIconCache::Defuser;
 
    // register team info cache
    m_teamInfoCache["TERRORIST"] = Team::Terrorist;
@@ -535,7 +557,7 @@ void MessageDispatcher::start (edict_t *ent, int32_t type) {
       m_bot = bots[ent];
 
       if (!m_bot) {
-         m_current = NetMsg::None;
+         stopCollection ();
          return;
       }
    }
@@ -547,7 +569,8 @@ void MessageDispatcher::stop () {
       return;
    }
    (this->*m_handlers[m_current]) ();
-   m_current = NetMsg::None;
+
+   stopCollection ();
 }
 
 void MessageDispatcher::ensureMessages () {

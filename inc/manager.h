@@ -9,12 +9,12 @@
 
 // bot creation tab
 struct BotRequest {
-   bool manual;
-   int difficulty;
-   int team;
-   int skin;
-   int personality;
-   String name;
+   bool manual {};
+   int difficulty {};
+   int team {};
+   int skin {};
+   int personality {};
+   String name {};
 };
 
 // manager class
@@ -37,18 +37,16 @@ private:
    float m_plantSearchUpdateTime {}; // time to update for searching planted bomb
    float m_lastChatTime {}; // global chat time timestamp
    float m_timeBombPlanted {}; // time the bomb were planted
-   float m_lastRadioTime[kGameTeamNum] {}; // global radio time
 
    int m_lastWinner {}; // the team who won previous round
    int m_lastDifficulty {}; // last bots difficulty
    int m_bombSayStatus {}; // some bot is issued whine about bomb
-   int m_lastRadio[kGameTeamNum] {}; // last radio message for team
+   int m_numPreviousPlayers {}; // number of players in game im previous player check
 
-   bool m_leaderChoosen[kGameTeamNum] {}; // is team leader choose thees round
-   bool m_economicsGood[kGameTeamNum] {}; // is team able to buy anything
    bool m_bombPlanted {}; // is bomb planted ?
    bool m_botsCanPause {}; // bots can do a little pause ?
    bool m_roundOver {}; // well, round is over>
+   bool m_resetHud {}; // reset HUD is called for some one
 
    Array <edict_t *> m_activeGrenades {}; // holds currently active grenades on the map
    Array <edict_t *> m_interestingEntities {};  // holds currently interesting entities on the map
@@ -59,6 +57,9 @@ private:
    SmallArray <UniqueBot> m_bots {}; // all available bots
 
    edict_t *m_killerEntity {}; // killer entity for bots
+   BotTeamData  m_teamData[kGameTeamNum] {}; // teams shared data
+
+   CountdownTimer m_holdQuotaManagementTimer {}; // prevent from running quota management for some time
 
 protected:
    BotCreateResult create (StringRef name, int difficulty, int personality, int team, int skin);
@@ -95,10 +96,11 @@ public:
    void kickEveryone (bool instant = false, bool zeroQuota = true);
    void kickBot (int index);
    void kickFromTeam (Team team, bool removeAll = false);
-   void killAllBots (int team = -1, bool silent = false);
+   void killAllBots (int team = Team::Invalid, bool silent = false);
    void maintainQuota ();
    void maintainAutoKill ();
    void maintainLeaders ();
+   void maintainRoundRestart ();
    void initQuota ();
    void initRound ();
    void decrementQuota (int by = 1);
@@ -117,16 +119,19 @@ public:
    void notifyBombDefuse ();
    void execGameEntity (edict_t *ent);
    void forEach (ForEachBot handler);
-   void erase (Bot *bot);
+   void disconnectBot (Bot *bot);
    void handleDeath (edict_t *killer, edict_t *victim);
    void setLastWinner (int winner);
    void checkBotModel (edict_t *ent, char *infobuffer);
    void checkNeedsToBeKicked ();
+   void refreshCreatureStatus ();
 
    bool isTeamStacked (int team);
    bool kickRandom (bool decQuota = true, Team fromTeam = Team::Unassigned);
+   bool balancedKickRandom (bool decQuota);
    bool hasCustomCSDMSpawnEntities ();
-   bool isLineBlockedBySmoke (const Vector &from, const Vector &to, float grenadeBloat = 1.0f);
+   bool isLineBlockedBySmoke (const Vector &from, const Vector &to);
+   bool isFrameSkipDisabled ();
 
 public:
    const Array <edict_t *> &getActiveGrenades () {
@@ -146,7 +151,7 @@ public:
    }
 
    bool checkTeamEco (int team) const {
-      return m_economicsGood[team];
+      return m_teamData[team].positiveEco;
    }
 
    int32_t getLastWinner () const {
@@ -216,23 +221,27 @@ public:
 
    void setLastRadioTimestamp (const int team, const float timestamp) {
       if (team == Team::CT || team == Team::Terrorist) {
-         m_lastRadioTime[team] = timestamp;
+         m_teamData[team].lastRadioTimestamp = timestamp;
       }
    }
 
    float getLastRadioTimestamp (const int team) const {
       if (team == Team::CT || team == Team::Terrorist) {
-         return m_lastRadioTime[team];
+         return m_teamData[team].lastRadioTimestamp;
       }
       return 0.0f;
    }
 
    void setLastRadio (const int team, const int radio) {
-      m_lastRadio[team] = radio;
+      m_teamData[team].lastRadioSlot = radio;
+   }
+
+   void setResetHUD (bool resetHud) {
+      m_resetHud = resetHud;
    }
 
    int getLastRadio (const int team) const {
-      return m_lastRadio[team];
+      return m_teamData[team].lastRadioSlot;
    }
 
    void setLastChatTimestamp (const float timestamp) {
@@ -278,7 +287,7 @@ public:
 // bot async worker wrapper
 class BotThreadWorker final : public Singleton <BotThreadWorker> {
 private:
-   ThreadPool m_botWorker {};
+   UniquePtr <ThreadPool> m_pool {};
 
 public:
    explicit BotThreadWorker () = default;
@@ -294,12 +303,12 @@ public:
          fn (); // no threads, no fun, just run task in current thread
          return;
       }
-      m_botWorker.enqueue (cr::move (fn));
+      m_pool->enqueue (cr::move (fn));
    }
 
 public:
    bool available () {
-      return m_botWorker.threadCount () > 0;
+      return m_pool && m_pool->threadCount () > 0;
    }
 };
 

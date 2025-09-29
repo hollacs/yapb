@@ -7,7 +7,7 @@
 
 #include <yapb.h>
 
-#if defined (BOT_STORAGE_EXPLICIT_INSTANTIATIONS)
+#if defined(BOT_STORAGE_EXPLICIT_INSTANTIATIONS)
 
 template <typename U> bool BotStorage::load (SmallArray <U> &data, ExtenHeader *exten, int32_t *outOptions) {
    auto type = guessType <U> ();
@@ -85,8 +85,19 @@ template <typename U> bool BotStorage::load (SmallArray <U> &data, ExtenHeader *
       if (tryReload ()) {
          return true;
       }
-      return error (isGraph, isDebug, file, "Unable to open %s file for reading (filename: '%s').", type.name, filename);
+
+      if (game.isDeveloperMode ()) {
+         return error (isGraph, isDebug, file, "Unable to open %s file for reading (filename: '%s').", type.name, filename);
+      }
+      return false;
    }
+
+   // erase the current graph just in case
+   auto unlinkIfGraph = [&] () {
+      if (isGraph) {
+         unlinkFromDisk (false, true);
+      }
+   };
 
    // read the header
    StorageHeader hdr {};
@@ -94,6 +105,8 @@ template <typename U> bool BotStorage::load (SmallArray <U> &data, ExtenHeader *
 
    // check the magic
    if (hdr.magic != kStorageMagic && hdr.magic != kStorageMagicUB) {
+      unlinkIfGraph ();
+
       if (tryReload ()) {
          return true;
       }
@@ -107,6 +120,8 @@ template <typename U> bool BotStorage::load (SmallArray <U> &data, ExtenHeader *
 
    // check the count
    if (hdr.length == 0 || hdr.length > kMaxNodes || hdr.length < kMaxNodeLinks) {
+      unlinkIfGraph ();
+
       if (tryReload ()) {
          return true;
       }
@@ -145,9 +160,8 @@ template <typename U> bool BotStorage::load (SmallArray <U> &data, ExtenHeader *
 
    // read compressed data
    if (file.read (compressed.data (), sizeof (uint8_t), compressedSize) == compressedSize) {
-
       // try to uncompress
-      if (ulz.uncompress (compressed.data (), hdr.compressed, reinterpret_cast <uint8_t *> (data.data ()), hdr.uncompressed) == ULZ::UncompressFailure) {
+      if (m_ulz->uncompress (compressed.data (), hdr.compressed, reinterpret_cast <uint8_t *> (data.data ()), hdr.uncompressed) == ULZ::UncompressFailure) {
          return error (isGraph, isDebug, file, "Unable to decompress ULZ data for %s (filename: '%s').", type.name, filename);
       }
       else {
@@ -192,7 +206,9 @@ template <typename U> bool BotStorage::load (SmallArray <U> &data, ExtenHeader *
             }
          }
 
-         ctrl.msg ("Loaded Bots %s data v%d (Memory: %.2fMB).", type.name, hdr.version, static_cast <float> (data.capacity () * sizeof (U)) / 1024.0f / 1024.0f);
+         if (game.isDeveloperMode ()) {
+            ctrl.msg ("Loaded Bots %s data v%d (Memory: %.2fMB).", type.name, hdr.version, static_cast <float> (data.capacity () * sizeof (U)) / 1024.0f / 1024.0f);
+         }
          file.close ();
 
          return true;
@@ -213,6 +229,9 @@ template <typename U> bool BotStorage::save (const SmallArray <U> &data, ExtenHe
    }
    const auto isGraph = !!(type.option & StorageOption::Graph);
 
+   // hide some messages with debug cvar
+   extern ConVar cv_debug;
+
    // do not allow to save graph with less than 8 nodes
    if (isGraph && graph.length () < kMaxNodeLinks) {
       ctrl.msg ("Can't save graph data with less than %d nodes. Please add some more before saving.", kMaxNodeLinks);
@@ -221,7 +240,9 @@ template <typename U> bool BotStorage::save (const SmallArray <U> &data, ExtenHe
    String filename = buildPath (storageToBotFile (type.option));
 
    if (data.empty ()) {
-      logger.error ("Unable to save %s file. Empty data. (filename: '%s').", type.name, filename);
+      if (isGraph || cv_debug) {
+         logger.error ("Unable to save %s file. Empty data. (filename: '%s').", type.name, filename);
+      }
       return false;
    }
    else if (isGraph) {
@@ -242,8 +263,12 @@ template <typename U> bool BotStorage::save (const SmallArray <U> &data, ExtenHe
    const auto rawLength = data.length () * sizeof (U);
    SmallArray <uint8_t> compressed (rawLength + sizeof (uint8_t) * ULZ::Excess);
 
+   // initialize compression
+   ULZ ulz {};
+   setUlzInstance (&ulz);
+
    // try to compress
-   const auto compressedLength = static_cast <size_t> (ulz.compress (reinterpret_cast <uint8_t *> (data.data ()), static_cast <int32_t> (rawLength), reinterpret_cast <uint8_t *> (compressed.data ())));
+   const auto compressedLength = static_cast <size_t> (m_ulz->compress (reinterpret_cast <uint8_t *> (data.data ()), static_cast <int32_t> (rawLength), reinterpret_cast <uint8_t *> (compressed.data ())));
 
    if (compressedLength > 0) {
       StorageHeader hdr {};
@@ -269,7 +294,6 @@ template <typename U> bool BotStorage::save (const SmallArray <U> &data, ExtenHe
       if ((type.option & StorageOption::Exten) && exten != nullptr) {
          file.write (exten, sizeof (ExtenHeader));
       }
-      extern ConVar cv_debug;
 
       // notify only about graph
       if (isGraph || cv_debug) {
@@ -327,11 +351,10 @@ String BotStorage::buildPath (int32_t file, bool isMemoryLoad, bool withoutMapNa
       { BotFile::Pathmatrix, FilePath (folders.train, "pmx")},
       { BotFile::LogFile, FilePath (folders.logs, "txt")},
       { BotFile::Graph, FilePath (folders.graph, "graph")},
-      { BotFile::PodbotPWF, FilePath (folders.podbot, "pwf")},
-      { BotFile::EbotEWP, FilePath (folders.ebot, "ewp")},
+      { BotFile::PodbotPWF, FilePath (folders.podbot, "pwf")}
    };
 
-   static StringArray path;
+   static StringArray path {};
    path.clear ();
 
    // if not memory file we're don't need game dir
@@ -386,14 +409,16 @@ int32_t BotStorage::storageToBotFile (int32_t options) {
    return BotFile::Graph;
 }
 
-void BotStorage::unlinkFromDisk () {
+void BotStorage::unlinkFromDisk (bool onlyTrainingData, bool silenceMessages) {
    // this function removes graph file from the hard disk
 
-   StringArray unlinkable;
+   StringArray unlinkable {};
    bots.kickEveryone (true);
 
    // if we're delete graph, delete all corresponding to it files
-   unlinkable.emplace (buildPath (BotFile::Graph)); // graph itself
+   if (!onlyTrainingData) {
+      unlinkable.emplace (buildPath (BotFile::Graph)); // graph itself
+   }
    unlinkable.emplace (buildPath (BotFile::Practice)); // corresponding to practice
    unlinkable.emplace (buildPath (BotFile::Vistable)); // corresponding to vistable
    unlinkable.emplace (buildPath (BotFile::Pathmatrix)); // corresponding to matrix
@@ -401,22 +426,32 @@ void BotStorage::unlinkFromDisk () {
    for (const auto &item : unlinkable) {
       if (plat.fileExists (item.chars ())) {
          plat.removeFile (item.chars ());
-         ctrl.msg ("File %s, has been deleted from the hard disk", item);
+
+         if (!silenceMessages) {
+            ctrl.msg ("File %s, has been deleted from the hard disk", item);
+         }
       }
-      else {
+      else if (!silenceMessages) {
          logger.error ("Unable to open %s", item);
       }
    }
    graph.reset (); // re-initialize points
+
+   if (onlyTrainingData) {
+      graph.loadGraphData ();
+
+      // take bots  back to game
+      cv_quota.revert ();
+   }
 }
 
 StringRef BotStorage::getRunningPath () {
    // this function get's relative path against bot library (bot library should reside in bin dir)
 
-   static String path;
+   static String path {};
 
-   // we're do not do relative (against bot's library) paths on android 
-   if (plat.android) {
+   // we're do not do relative (against bot's library) paths on specific cases
+   if (m_useNonRelativePaths) {
       if (path.empty ()) {
          path = strings.joinPath (game.getRunningModName (), folders.addons, folders.bot);
       }
@@ -427,8 +462,13 @@ StringRef BotStorage::getRunningPath () {
    if (path.empty ()) {
       path = SharedLibrary::path (&bstor);
 
-      if (path.startsWith ("<unk")) {
+      if (path.empty ()) {
          logger.fatal ("Unable to detect library path. Giving up...");
+      }
+
+      // remove dot prefix
+      if (path.startsWith (".")) {
+         path.ltrim (".\\/");
       }
       auto parts = path.substr (1).split (kPathSeparator);
 
@@ -441,10 +481,10 @@ StringRef BotStorage::getRunningPath () {
 }
 
 StringRef BotStorage::getRunningPathVFS () {
-   static String path;
+   static String path {};
 
    // we're do not do relative (against bot's library) paths on android 
-   if (plat.android) {
+   if (m_useNonRelativePaths) {
       if (path.empty ()) {
          path = strings.joinPath (folders.addons, folders.bot);
       }
@@ -454,10 +494,27 @@ StringRef BotStorage::getRunningPathVFS () {
    if (path.empty ()) {
       path = getRunningPath ();
 
-      path = path.substr (path.find (game.getRunningModName ())); // skip to the game dir
+      path = path.substr (path.rfind (game.getRunningModName ())); // skip to the game dir
       path = path.substr (path.find (kPathSeparator) + 1); // skip the game dir
    }
    return path;
+}
+
+void BotStorage::checkInstallLocation () {
+   if (plat.android || plat.emscripten) {
+      m_useNonRelativePaths = true;
+      return;
+   }
+   String path = SharedLibrary::path (&bstor);
+
+   if (path.empty ()) {
+      m_useNonRelativePaths = true;
+      return;
+   }
+   String dpath = strings.joinPath (folders.addons, folders.bot, folders.bin);
+   path = path.substr (0, path.rfind (kPathSeparator));
+
+   m_useNonRelativePaths = !path.lowercase ().endsWith (dpath.lowercase ());
 }
 
 #endif // BOT_STORAGE_EXPLICIT_INSTANTIATIONS

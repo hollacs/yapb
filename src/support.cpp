@@ -7,11 +7,10 @@
 
 #include <yapb.h>
 
-ConVar cv_display_welcome_text ("display_welcome_text", "1", "Enables or disables showing welcome message to host entity on game start.");
-ConVar cv_enable_query_hook ("enable_query_hook", "0", "Enables or disables fake server queries response, that shows bots as real players in server browser.");
-ConVar cv_breakable_health_limit ("breakable_health_limit", "500.0", "Specifies the maximum health of breakable object, that bot will consider to destroy.", true, 1.0f, 3000.0);
-ConVar cv_enable_fake_steamids ("enable_fake_steamids", "0", "Allows or disallows bots to return fake steam id.");
-ConVar cv_count_players_for_fakeping ("count_players_for_fakeping", "1", "Count player pings when calculating average ping for bots. If no, some random ping chosen for bots.");
+ConVar cv_display_welcome_text ("display_welcome_text", "1", "Enables or disables showing a welcome message to the host entity on game start.");
+ConVar cv_enable_query_hook ("enable_query_hook", "0", "Enables or disables fake server query responses, which show bots as real players in the server browser.");
+ConVar cv_breakable_health_limit ("breakable_health_limit", "500.0", "Specifies the maximum health of a breakable object that the bot will consider destroying.", true, 1.0f, 3000.0);
+ConVar cv_enable_fake_steamids ("enable_fake_steamids", "0", "Allows or disallows bots to return a fake Steam ID.");
 
 BotSupport::BotSupport () {
    m_needToSendWelcome = false;
@@ -33,45 +32,53 @@ BotSupport::BotSupport () {
       "engine is operative, hello and goodbye",
       "high amigo, your administration has been great last day",
       "attention, expect experimental armed hostile presence",
-      "warning, medical attention required"
+      "warning, medical attention required",
+      "high man, at your command",
+      "check check, test, mike check, talk device is activated",
+      "hello pal, at your service",
+      "good, day mister, your administration is now acknowledged",
+      "attention, anomalous agent activity, detected",
+      "mister, you are going down",
+      "all command access granted, over and out",
+      "buzwarn hostile presence detected nearest to your sector. over and out. doop"
+      "hostile resistance detected"
    };
 
    // register weapon aliases
    m_weaponAliases = {
-      { Weapon::USP, "usp" }, // HK USP .45 Tactical
-      { Weapon::Glock18, "glock" }, // Glock18 Select Fire
-      { Weapon::Deagle, "deagle" }, // Desert Eagle .50AE
-      { Weapon::P228, "p228" }, // SIG P228
-      { Weapon::Elite, "elite" }, // Dual Beretta 96G Elite
-      { Weapon::FiveSeven, "fn57" }, // FN Five-Seven
-      { Weapon::M3, "m3" }, // Benelli M3 Super90
-      { Weapon::XM1014, "xm1014" }, // Benelli XM1014
-      { Weapon::MP5, "mp5" }, // HK MP5-Navy
-      { Weapon::TMP, "tmp" }, // Steyr Tactical Machine Pistol
-      { Weapon::P90, "p90" }, // FN P90
-      { Weapon::MAC10, "mac10" }, // Ingram MAC-10
-      { Weapon::UMP45, "ump45" }, // HK UMP45
-      { Weapon::AK47, "ak47" }, // Automat Kalashnikov AK-47
-      { Weapon::Galil, "galil" }, // IMI Galil
-      { Weapon::Famas, "famas" }, // GIAT FAMAS
-      { Weapon::SG552, "sg552" }, // Sig SG-552 Commando
-      { Weapon::M4A1, "m4a1" }, // Colt M4A1 Carbine
-      { Weapon::AUG, "aug" }, // Steyr Aug
-      { Weapon::Scout, "scout" }, // Steyr Scout
-      { Weapon::AWP, "awp" }, // AI Arctic Warfare/Magnum
-      { Weapon::G3SG1, "g3sg1" }, // HK G3/SG-1 Sniper Rifle
-      { Weapon::SG550, "sg550" }, // Sig SG-550 Sniper
-      { Weapon::M249, "m249" }, // FN M249 Para
-      { Weapon::Flashbang, "flash" }, // Concussion Grenade
-      { Weapon::Explosive, "hegren" }, // High-Explosive Grenade
-      { Weapon::Smoke, "sgren" }, // Smoke Grenade
-      { Weapon::Armor, "vest" }, // Kevlar Vest
-      { Weapon::ArmorHelm, "vesthelm" }, // Kevlar Vest and Helmet
-      { Weapon::Defuser, "defuser" }, // Defuser Kit
-      { Weapon::Shield, "shield" }, // Tactical Shield
-      { Weapon::Knife, "knife" } // Knife
+      { Weapon::USP, AliasInfo { "usp", "HK USP .45 Tactical" } },
+      { Weapon::Glock18, AliasInfo { "glock", "Glock18 Select Fire" } },
+      { Weapon::Deagle, AliasInfo { "deagle", "Desert Eagle .50AE" } },
+      { Weapon::P228, AliasInfo { "p228", "SIG P228" } },
+      { Weapon::Elite, AliasInfo { "elite", "Dual Beretta 96G Elite" } },
+      { Weapon::FiveSeven, AliasInfo { "fn57", "FN Five-Seven" } },
+      { Weapon::M3, AliasInfo { "m3", "Benelli M3 Super90" } },
+      { Weapon::XM1014, AliasInfo { "xm1014", "Benelli XM1014" } },
+      { Weapon::MP5, AliasInfo { "mp5", "HK MP5-Navy" } },
+      { Weapon::TMP, AliasInfo { "tmp", "Steyr Tactical Machine Pistol" } },
+      { Weapon::P90, AliasInfo { "p90", "FN P90" } },
+      { Weapon::MAC10, AliasInfo { "mac10", "Ingram MAC-10" } },
+      { Weapon::UMP45, AliasInfo { "ump45", "HK UMP45" } },
+      { Weapon::AK47, AliasInfo { "ak47", "Automat Kalashnikov AK-47" } },
+      { Weapon::Galil, AliasInfo { "galil", "IMI Galil" } },
+      { Weapon::Famas, AliasInfo { "famas", "GIAT FAMAS" } },
+      { Weapon::SG552, AliasInfo { "sg552", "Sig SG-552 Commando" } },
+      { Weapon::M4A1, AliasInfo { "m4a1", "Colt M4A1 Carbine" } },
+      { Weapon::AUG, AliasInfo { "aug", "Steyr Aug" } },
+      { Weapon::Scout, AliasInfo { "scout", "Steyr Scout" } },
+      { Weapon::AWP, AliasInfo { "awp", "AI Arctic Warfare/Magnum" } },
+      { Weapon::G3SG1, AliasInfo { "g3sg1", "HK G3/SG-1 Sniper Rifle" } },
+      { Weapon::SG550, AliasInfo { "sg550", "Sig SG-550 Sniper" } },
+      { Weapon::M249, AliasInfo { "m249", "FN M249 Para" } },
+      { Weapon::Flashbang, AliasInfo { "flash", "Concussion Grenade" } },
+      { Weapon::Explosive, AliasInfo { "hegren", "High-Explosive Grenade" } },
+      { Weapon::Smoke, AliasInfo { "sgren", "Smoke Grenade" } },
+      { Weapon::Armor, AliasInfo { "vest", "Kevlar Vest" } },
+      { Weapon::ArmorHelm, AliasInfo { "vesthelm", "Kevlar Vest and Helmet" } },
+      { Weapon::Defuser, AliasInfo { "defuser", "Defuser Kit" } },
+      { Weapon::Shield, AliasInfo { "shield", "Tactical Shield" } },
+      { Weapon::Knife, AliasInfo { "knife", "Knife" } }
    };
-
    m_clients.resize (kGameMaxPlayers + 1);
 }
 
@@ -79,7 +86,7 @@ bool BotSupport::isAlive (edict_t *ent) {
    if (game.isNullEntity (ent)) {
       return false;
    }
-   return ent->v.deadflag == DEAD_NO && ent->v.health > 0 && ent->v.movetype != MOVETYPE_NOCLIP;
+   return ent->v.deadflag == DEAD_NO && ent->v.health > 0.0f && ent->v.movetype != MOVETYPE_NOCLIP;
 }
 
 bool BotSupport::isVisible (const Vector &origin, edict_t *ent) {
@@ -95,21 +102,13 @@ bool BotSupport::isVisible (const Vector &origin, edict_t *ent) {
    return true;
 }
 
-void BotSupport::decalTrace (entvars_t *pev, TraceResult *trace, int logotypeIndex) {
+void BotSupport::decalTrace (TraceResult *trace, int decalIndex) {
    // this function draw spraypaint depending on the tracing results.
 
-   auto logo = conf.getLogoName (logotypeIndex);
-
-   int entityIndex = -1, message = TE_DECAL;
-   int decalIndex = engfuncs.pfnDecalIndex (logo.chars ());
-
-   if (decalIndex < 0) {
-      decalIndex = engfuncs.pfnDecalIndex ("{lambda06");
-   }
-
-   if (cr::fequal (trace->flFraction, 1.0f)) {
+   if (cr::fequal (trace->flFraction, 1.0f) || decalIndex <= 0) {
       return;
    }
+   int entityIndex = -1, message = TE_DECAL;
 
    if (!game.isNullEntity (trace->pHit)) {
       if (trace->pHit->v.solid == SOLID_BSP || trace->pHit->v.movetype == MOVETYPE_PUSHSTEP) {
@@ -137,32 +136,19 @@ void BotSupport::decalTrace (entvars_t *pev, TraceResult *trace, int logotypeInd
          decalIndex -= 256;
       }
    }
+   MessageWriter msg {};
 
-   if (logo.startsWith ("{")) {
-      MessageWriter (MSG_BROADCAST, SVC_TEMPENTITY)
-         .writeByte (TE_PLAYERDECAL)
-         .writeByte (game.indexOfEntity (pev->pContainingEntity))
-         .writeCoord (trace->vecEndPos.x)
-         .writeCoord (trace->vecEndPos.y)
-         .writeCoord (trace->vecEndPos.z)
-         .writeShort (static_cast <short> (game.indexOfEntity (trace->pHit)))
-         .writeByte (decalIndex);
+   msg.start (MSG_BROADCAST, SVC_TEMPENTITY)
+      .writeByte (message)
+      .writeCoord (trace->vecEndPos.x)
+      .writeCoord (trace->vecEndPos.y)
+      .writeCoord (trace->vecEndPos.z)
+      .writeByte (decalIndex);
+
+   if (entityIndex) {
+      msg.writeShort (entityIndex);
    }
-   else {
-      MessageWriter msg;
-
-      msg.start (MSG_BROADCAST, SVC_TEMPENTITY)
-         .writeByte (message)
-         .writeCoord (trace->vecEndPos.x)
-         .writeCoord (trace->vecEndPos.y)
-         .writeCoord (trace->vecEndPos.z)
-         .writeByte (decalIndex);
-
-      if (entityIndex) {
-         msg.writeShort (entityIndex);
-      }
-      msg.end ();
-   }
+   msg.end ();
 }
 
 bool BotSupport::isPlayer (edict_t *ent) {
@@ -214,7 +200,12 @@ bool BotSupport::isDoorEntity (edict_t *ent) {
    if (game.isNullEntity (ent)) {
       return false;
    }
-   return ent->v.classname.str ().startsWith ("func_door");
+   const auto classHash = ent->v.classname.str ().hash ();
+
+   constexpr auto kFuncDoor = StringRef::fnv1a32 ("func_door");
+   constexpr auto kFuncDoorRotating = StringRef::fnv1a32 ("func_door_rotating");
+
+   return classHash == kFuncDoor || classHash == kFuncDoorRotating;
 }
 
 bool BotSupport::isHostageEntity (edict_t *ent) {
@@ -229,13 +220,19 @@ bool BotSupport::isHostageEntity (edict_t *ent) {
    return classHash == kHostageEntity || classHash == kMonsterScientist;
 }
 
-bool BotSupport::isShootableBreakable (edict_t *ent) {
-   if (game.isNullEntity (ent) || ent == game.getStartEntity ()) {
+bool BotSupport::isBreakableEntity (edict_t *ent, bool initialSeed) {
+   if (!initialSeed) {
+      if (!game.hasBreakables ()) {
+         return false;
+      }
+   }
+
+   if (game.isNullEntity (ent) || ent == game.getStartEntity () || (!initialSeed && !game.isBreakableValid (ent))) {
       return false;
    }
    const auto limit = cv_breakable_health_limit.as <float> ();
 
-   // not shootable
+   // not shoot-able
    if (ent->v.health >= limit) {
       return false;
    }
@@ -244,7 +241,7 @@ bool BotSupport::isShootableBreakable (edict_t *ent) {
    constexpr auto kFuncWall = StringRef::fnv1a32 ("func_wall");
 
    if (ent->v.takedamage > 0.0f && ent->v.impulse <= 0 && !(ent->v.flags & FL_WORLDBRUSH) && !(ent->v.spawnflags & SF_BREAK_TRIGGER_ONLY)) {
-      auto classHash = ent->v.classname.str ().hash ();
+      const auto classHash = ent->v.classname.str ().hash ();
 
       if (classHash == kFuncBreakable || (classHash == kFuncPushable && (ent->v.spawnflags & SF_PUSH_BREAKABLE)) || classHash == kFuncWall) {
          return ent->v.movetype == MOVETYPE_PUSH || ent->v.movetype == MOVETYPE_PUSHSTEP;
@@ -254,10 +251,7 @@ bool BotSupport::isShootableBreakable (edict_t *ent) {
 }
 
 bool BotSupport::isFakeClient (edict_t *ent) {
-   if (bots[ent] != nullptr || (!game.isNullEntity (ent) && (ent->v.flags & FL_FAKECLIENT))) {
-      return true;
-   }
-   return false;
+   return bots[ent] != nullptr || (!game.isNullEntity (ent) && (ent->v.flags & FL_FAKECLIENT));
 }
 
 void BotSupport::checkWelcome () {
@@ -282,12 +276,12 @@ void BotSupport::checkWelcome () {
       auto graphModified = graph.getModifiedBy ();
 
       // legacy welcome message, to respect the original code
-      constexpr StringRef legacyWelcomeMessage = "Welcome to POD-Bot V2.5 by Count Floyd\n"
+      constexpr StringRef kLegacyWelcomeMessage = "Welcome to POD-Bot V2.5 by Count Floyd\n"
          "Visit http://www.nuclearbox.com/podbot/ or\n"
          "      http://www.botepidemic.com/podbot for Updates\n";
 
       // it's should be send in very rare cases
-      const bool sendLegacyWelcome = rg.chance (2);
+      const bool sendLegacyWelcome = rg.chance (game.is (GameFlags::Legacy) ? 25 : 2);
 
       if (!graphAuthor.startsWith (product.name)) {
          authorStr.assignf ("Navigation Graph by: %s", graphAuthor);
@@ -328,53 +322,44 @@ void BotSupport::checkWelcome () {
 
       // send the hud message
       game.sendHudMessage (receiveEnt, textParams,
-         sendLegacyWelcome ? legacyWelcomeMessage.chars () : modernWelcomeMessage.chars ());
+         sendLegacyWelcome ? kLegacyWelcomeMessage.chars () : modernWelcomeMessage.chars ());
 
       m_welcomeReceiveTime = 0.0f;
       m_needToSendWelcome = false;
    }
 }
 
-bool BotSupport::findNearestPlayer (void **pvHolder, edict_t *to, float searchDistance, bool sameTeam, bool needBot, bool needAlive, bool needDrawn, bool needBotWithC4) {
+bool BotSupport::findNearestPlayer (void **pvHolder, edict_t *to, float searchDistance, bool sameTeam, bool needBot,
+   bool needAlive, bool needDrawn, bool needBotWithC4) {
+
    // this function finds nearest to to, player with set of parameters, like his
    // team, live status, search distance etc. if needBot is true, then pvHolder, will
    // be filled with bot pointer, else with edict pointer(!).
 
    searchDistance = cr::sqrf (searchDistance);
-
-   edict_t *survive = nullptr; // pointer to temporally & survive entity
-   float nearestPlayer = 4096.0f; // nearest player
-
-   const int toTeam = game.getTeam (to);
+   float nearestPlayerDistanceSq = cr::sqrf (4096.0f); // nearest player
 
    for (const auto &client : m_clients) {
       if (!(client.flags & ClientFlags::Used) || client.ent == to) {
          continue;
       }
 
-      if ((sameTeam && client.team != toTeam) || (needAlive && !(client.flags & ClientFlags::Alive)) || (needBot && !bots[client.ent]) || (needDrawn && (client.ent->v.effects & EF_NODRAW)) || (needBotWithC4 && (client.ent->v.weapons & Weapon::C4))) {
+      if ((sameTeam && client.team != game.getTeam (to))
+         || (needAlive && !(client.flags & ClientFlags::Alive))
+         || (needBot && !bots[client.ent])
+         || (needDrawn && (client.ent->v.effects & EF_NODRAW))
+         || (needBotWithC4 && (client.ent->v.weapons & Weapon::C4))) {
+
          continue; // filter players with parameters
       }
       const float distanceSq = client.ent->v.origin.distanceSq (to->v.origin);
 
-      if (distanceSq < nearestPlayer && distanceSq < searchDistance) {
-         nearestPlayer = distanceSq;
-         survive = client.ent;
+      if (distanceSq < nearestPlayerDistanceSq && distanceSq < searchDistance) {
+         nearestPlayerDistanceSq = distanceSq;
+         *pvHolder = needBot ? reinterpret_cast <void *> (bots[client.ent]) : reinterpret_cast <void *> (client.ent);
       }
    }
-
-   if (game.isNullEntity (survive)) {
-      return false; // nothing found
-   }
-
-   // fill the holder
-   if (needBot) {
-      *pvHolder = reinterpret_cast <void *> (bots[survive]);
-   }
-   else {
-      *pvHolder = reinterpret_cast <void *> (survive);
-   }
-   return true;
+   return !!*pvHolder;
 }
 
 void BotSupport::updateClients () {
@@ -384,11 +369,11 @@ void BotSupport::updateClients () {
       edict_t *player = game.playerOfIndex (i);
       Client &client = m_clients[i];
 
-      if (!game.isNullEntity (player) && (player->v.flags & FL_CLIENT)) {
+      if (!game.isNullEntity (player) && (player->v.flags & FL_CLIENT) && !(player->v.flags & FL_DORMANT)) {
          client.ent = player;
          client.flags |= ClientFlags::Used;
 
-         if (util.isAlive (player)) {
+         if (isAlive (player)) {
             client.flags |= ClientFlags::Alive;
          }
          else {
@@ -404,147 +389,6 @@ void BotSupport::updateClients () {
          client.flags &= ~(ClientFlags::Used | ClientFlags::Alive);
          client.ent = nullptr;
       }
-   }
-}
-
-int BotSupport::getPingBitmask (edict_t *ent, int loss, int ping) {
-   // this function generates bitmask for SVC_PINGS engine message
-   // see:
-   //    https://github.com/dreamstalker/rehlds/blob/a680f18ee1e7eb8c39fbdc45682163ca9477d783/rehlds/engine/sv_main.cpp#L4590
-
-   const auto emit = [] (int s0, int s1, int s2) {
-      return (s0 & (cr::bit (s1) - 1)) << s2;
-   };
-   return emit (loss, 7, 18) | emit (ping, 12, 6) | emit (game.indexOfPlayer (ent), 5, 1) | 1;
-}
-
-void BotSupport::calculatePings () {
-   worker.enqueue ([this] () {
-      syncCalculatePings ();
-   });
-}
-
-void BotSupport::syncCalculatePings () {
-   if (!game.is (GameFlags::HasFakePings) || cv_show_latency.as <int> () != 2) {
-      return;
-   }
-   MutexScopedLock lock (m_cs);
-
-   Twin <int, int> average { 0, 0 };
-   int numHumans = 0;
-
-   // only count player pings if we're allowed to
-   if (cv_count_players_for_fakeping) {
-      // first get average ping on server, and store real client pings
-      for (auto &client : m_clients) {
-         if (!(client.flags & ClientFlags::Used) || isFakeClient (client.ent)) {
-            continue;
-         }
-         int ping, loss;
-         engfuncs.pfnGetPlayerStats (client.ent, &ping, &loss);
-
-         // @note: for those who asking on a email, we CAN call pfnGetPlayerStats hl-engine function in a separate thread
-         // since the function doesn't modify anything inside engine, so race-condition and crash isn't viable situation
-         // it's just fills ping and loss from engine structures, the only way to cause crash in separate thread
-         // is to call it with a invalid ``client`` pointer (on goldsrc), thus causing Con_Printf which is not compatible with
-         // multi-threaded environment
-         //
-         // see:
-         //    https://github.com/dreamstalker/rehlds/blob/a680f18ee1e7eb8c39fbdc45682163ca9477d783/rehlds/engine/pr_cmds.cpp#L2735C15-L2735C32
-         //    https://github.com/fwgs/xash3d-fwgs/blob/f5b9826fd9bbbdc5293c1ff522de11ce28d3c9f2/engine/server/sv_game.c#L4443
-
-         // store normal client ping
-         client.ping = getPingBitmask (client.ent, loss, ping > 0 ? ping : rg (8, 16)); // getting player ping sometimes fails
-         ++numHumans;
-
-         average.first += ping;
-         average.second += loss;
-      }
-
-      if (numHumans > bots.getBotCount () / 4) {
-         average.first /= numHumans;
-         average.second /= numHumans;
-      }
-      else {
-         average.first = rg (10, 20);
-         average.second = rg (5, 10);
-      }
-   }
-   else {
-      average.first = rg (10, 20);
-      average.second = rg (5, 10);
-   }
-
-   // now calculate bot ping based on average from players
-   for (auto &client : m_clients) {
-      if (!(client.flags & ClientFlags::Used)) {
-         continue;
-      }
-      auto bot = bots[client.ent];
-
-      // we're only interested in bots here
-      if (!bot) {
-         continue;
-      }
-      const int part = static_cast <int> (static_cast <float> (average.first) * 0.2f);
-
-      int botPing = bot->m_basePing + rg (average.first - part, average.first + part) + rg (bot->m_difficulty / 2, bot->m_difficulty);
-      const int botLoss = rg (average.second / 2, average.second);
-
-      if (botPing < 2) {
-         botPing = rg (10, 23);
-      }
-      else if (botPing > 100) {
-         botPing = rg (30, 40);
-      }
-      client.ping = getPingBitmask (client.ent, botLoss, botPing);
-   }
-}
-
-void BotSupport::emitPings (edict_t *to) {
-   static MessageWriter msg;
-
-   auto isThirdpartyBot = [] (edict_t *ent) {
-      return !bots[ent] && (ent->v.flags & FL_FAKECLIENT);
-   };
-
-   for (auto &client : m_clients) {
-      if (!(client.flags & ClientFlags::Used) || client.ent == game.getLocalEntity () || isThirdpartyBot (client.ent)) {
-         continue;
-      }
-
-      // do not send to dormants
-      if (client.ent->v.flags & FL_DORMANT) {
-         continue;
-      }
-
-      // no ping, no fun
-      if (!client.ping) {
-         client.ping = getPingBitmask (client.ent, rg (5, 10), rg (15, 40));
-      }
-
-      msg.start (MSG_ONE_UNRELIABLE, SVC_PINGS, nullptr, to)
-         .writeLong (client.ping)
-         .end ();
-   }
-}
-
-void BotSupport::resetPings (edict_t *to) {
-   static MessageWriter msg;
-
-   // no reset if game isn't support them
-   if (!game.is (GameFlags::HasFakePings)) {
-      return;
-   }
-
-   for (auto &client : m_clients) {
-      if (!(client.flags & ClientFlags::Used) || isFakeClient (client.ent)) {
-         continue;
-      }
-
-      msg.start (MSG_ONE_UNRELIABLE, SVC_PINGS, nullptr, client.ent)
-         .writeLong (getPingBitmask (to, 0, 0))
-         .end ();
    }
 }
 
@@ -578,86 +422,60 @@ StringRef BotSupport::weaponIdToAlias (int32_t id) {
    StringRef none = "none";
 
    if (m_weaponAliases.exists (id)) {
-      return m_weaponAliases[id];
+      return m_weaponAliases[id].first;
    }
    return none;
 }
 
-// helper class for reading wave header
-class WaveEndianessHelper final : public NonCopyable {
-private:
-#if defined (CR_ARCH_CPU_BIG_ENDIAN)
-   bool little { false };
-#else
-   bool little { true };
-#endif
+float BotSupport::getWaveFileDuration (StringRef filename) {
+   constexpr auto kZeroLength = 0.0f;
 
-public:
-   uint16_t read16 (uint16_t value) {
-      return little ? value : static_cast <uint16_t> ((value >> 8) | (value << 8));
-   }
-
-   uint32_t read32 (uint32_t value) {
-      return little ? value : (((value & 0x000000ff) << 24) | ((value & 0x0000ff00) << 8) | ((value & 0x00ff0000) >> 8) | ((value & 0xff000000) >> 24));
-   }
-
-   bool isWave (char *format) const {
-      if (little && memcmp (format, "WAVE", 4) == 0) {
-         return true;
-      }
-      return *reinterpret_cast <uint32_t *> (format) == 0x57415645;
-   }
-};
-
-float BotSupport::getWaveLength (StringRef filename) {
+   using WaveHeader = WaveHelper <>::Header;
    auto filePath = strings.joinPath (cv_chatter_path.as <StringRef> (), strings.format ("%s.wav", filename));
 
    MemFile fp (filePath);
 
    // we're got valid handle?
    if (!fp) {
-      return 0.0f;
+      return kZeroLength;
    }
 
-   // else fuck with manual search
-   struct WavHeader {
-      char riff[4];
-      uint32_t chunkSize;
-      char wave[4];
-      char fmt[4];
-      uint32_t subchunk1Size;
-      uint16_t audioFormat;
-      uint16_t numChannels;
-      uint32_t sampleRate;
-      uint32_t byteRate;
-      uint16_t blockAlign;
-      uint16_t bitsPerSample;
-      char dataChunkId[4];
-      uint32_t dataChunkLength;
-   } header {};
+   WaveHeader hdr {};
+   static WaveHelper wh {};
 
-   static WaveEndianessHelper weh;
-
-   if (fp.read (&header, sizeof (WavHeader)) == 0) {
-      logger.error ("Wave File %s - has wrong or unsupported format", filePath);
-      return 0.0f;
+   if (fp.read (&hdr, sizeof (WaveHeader)) == 0) {
+      logger.error ("WAVE %s - has wrong or unsupported format.", filePath);
+      return kZeroLength;
    }
    fp.close ();
 
-   if (!weh.isWave (header.wave)) {
-      logger.error ("Wave File %s - has wrong wave chunk id", filePath);
-      return 0.0f;
+   if (!wh.isWave (hdr.wave)) {
+      logger.error ("WAVE %s - has wrong wave chunk id.", filePath);
+      return kZeroLength;
    }
 
-   if (weh.read32 (header.dataChunkLength) == 0) {
-      logger.error ("Wave File %s - has zero length!", filePath);
-      return 0.0f;
+   if (wh.read32 <uint32_t> (hdr.dataChunkLength) == 0) {
+      logger.error ("WAVE %s - has zero length!.", filePath);
+      return kZeroLength;
    }
 
-   const auto length = static_cast <float> (weh.read32 (header.dataChunkLength));
-   const auto bps = static_cast <float> (weh.read16 (header.bitsPerSample)) / 8;
-   const auto channels = static_cast <float> (weh.read16 (header.numChannels));
-   const auto rate = static_cast <float> (weh.read32 (header.sampleRate));
+   const auto length = wh.read32  <float> (hdr.dataChunkLength);
+   const auto bps = wh.read16 <float> (hdr.bitsPerSample) / 8.0f;
+   const auto channels = wh.read16 <float> (hdr.numChannels);
+   const auto rate = wh.read32 <float> (hdr.sampleRate);
 
    return length / bps / channels / rate;
+}
+
+void BotSupport::setCustomCvarDescriptions () {
+   // set the cvars custom descriptions here if needed
+
+   String restrictInfo = "Specifies a semicolon separated list of weapons that are not allowed to be bought/picked up.\n";
+   restrictInfo += "The list of weapons for Counter-Strike 1.6:\n";
+
+   // fill the restrict information
+   m_weaponAliases.foreach ([&] (const int32_t &, const AliasInfo &alias) {
+      restrictInfo.appendf ("%s - %s\n", alias.first, alias.second);
+   });
+   game.setCvarDescription (cv_restricted_weapons, restrictInfo);
 }

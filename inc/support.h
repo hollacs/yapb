@@ -8,8 +8,8 @@
 #pragma once
 
 class BotSupport final : public Singleton <BotSupport> {
-private:
-   mutable Mutex m_cs {};
+   using AliasInfo = Twin <StringRef, StringRef>;
+   using AliasMap = HashMap <int32_t, AliasInfo, EmptyHash <int32_t> >;
 
 private:
    bool m_needToSendWelcome {};
@@ -18,7 +18,7 @@ private:
    StringArray m_sentences {};
    SmallArray <Client> m_clients {};
 
-   HashMap <int32_t, String> m_weaponAliases {};
+   AliasMap m_weaponAliases {};
 
 public:
    BotSupport ();
@@ -59,31 +59,16 @@ public:
    bool isDoorEntity (edict_t *ent);
 
    // this function is checking that pointed by ent pointer obstacle, can be destroyed
-   bool isShootableBreakable (edict_t *ent);
+   bool isBreakableEntity (edict_t *ent, bool initialSeed = false);
 
    // nearest player search helper
    bool findNearestPlayer (void **holder, edict_t *to, float searchDistance = 4096.0, bool sameTeam = false, bool needBot = false, bool needAlive = false, bool needDrawn = false, bool needBotWithC4 = false);
 
    // tracing decals for bots spraying logos
-   void decalTrace (entvars_t *pev, TraceResult *trace, int logotypeIndex);
+   void decalTrace (TraceResult *trace, int decalIndex);
 
    // update stats on clients
    void updateClients ();
-
-   // generates ping bitmask for SVC_PINGS message
-   int getPingBitmask (edict_t *ent, int loss, int ping);
-
-   // calculate our own pings for all the players
-   void syncCalculatePings ();
-
-   // calculate our own pings for all the players
-   void calculatePings ();
-
-   // send modified pings to all the clients
-   void emitPings (edict_t *to);
-
-   // reset ping to zero values
-   void resetPings (edict_t *to);
 
    // checks if same model omitting the models directory
    bool isModel (const edict_t *ent, StringRef model);
@@ -95,7 +80,10 @@ public:
    StringRef getFakeSteamId (edict_t *ent);
 
    // get's the wave length
-   float getWaveLength (StringRef filename);
+   float getWaveFileDuration (StringRef filename);
+
+   // set custom cvar descriptions
+   void setCustomCvarDescriptions ();
 
 public:
 

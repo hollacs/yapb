@@ -2,17 +2,15 @@
 # YaPB - Counter-Strike Bot based on PODBot by Markus Klinge.
 #
 # Copyright © 2023 Velaron.
-# Copyright © YaPB Project Developers <yapb@jeefo.net>. 
+# Copyright © YaPB Project Developers <yapb@jeefo.net>.
 #
 # SPDX-License-Identifier: MIT
 #
+cmake_minimum_required(VERSION 3.5)
 
-cmake_minimum_required(VERSION 3.15)
 project(yapb VERSION 4.5 LANGUAGES CXX)
 
-if(NOT ANDROID)
-   set(CMAKE_SHARED_MODULE_PREFIX "")
-endif()
+set(CMAKE_SHARED_MODULE_PREFIX "")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,6 +23,7 @@ set(YAPB_SRC
     "src/config.cpp"
     "src/control.cpp"
     "src/engine.cpp"
+    "src/fakeping.cpp"
     "src/graph.cpp"
     "src/hooks.cpp"
     "src/linkage.cpp"
@@ -42,14 +41,18 @@ set(YAPB_SRC
     "src/vistable.cpp"
 )
 
-add_library(${PROJECT_NAME} MODULE ${YAPB_SRC})
+if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+    add_executable(${PROJECT_NAME} ${YAPB_SRC})
+else ()
+    add_library(${PROJECT_NAME} SHARED ${YAPB_SRC})
+endif ()
 find_package(Git QUIET)
 
 if(GIT_FOUND)
     execute_process(COMMAND hostname OUTPUT_VARIABLE BUILD_MACHINE OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    execute_process(COMMAND git rev-parse --short HEAD OUTPUT_VARIABLE BUILD_HASH OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    execute_process(COMMAND git rev-list --count HEAD OUTPUT_VARIABLE BUILD_COUNT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    execute_process(COMMAND git log --pretty="%ae" -1 OUTPUT_VARIABLE BUILD_AUTHOR OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEAD OUTPUT_VARIABLE BUILD_HASH OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-list --count HEAD OUTPUT_VARIABLE BUILD_COUNT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} log --pretty="%ae" -1 OUTPUT_VARIABLE BUILD_AUTHOR OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 
     set(BUILD_COMPILER ${CMAKE_CXX_COMPILER_ID}\ ${CMAKE_CXX_COMPILER_VERSION})
     set(BUILD_VERSION ${PROJECT_VERSION})
@@ -60,22 +63,36 @@ if(GIT_FOUND)
     target_compile_definitions(${PROJECT_NAME} PRIVATE VERSION_GENERATED)
 endif()
 
-if((CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU") AND NOT MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE -flto=auto -fno-exceptions -fno-rtti -fno-threadsafe-statics -pthread)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(i386|x86|x86_64|X86|amd64|AMD64)" AND NOT CMAKE_LIBRARY_ARCHITECTURE MATCHES "^(arm|aarch64|ppc)")
+    set(BUILD_X86 true)
+endif()
 
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-        target_compile_options(${PROJECT_NAME} PRIVATE -march=armv8-a+fp+simd)
-    elseif(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^ppc")
-        target_compile_options(${PROJECT_NAME} PRIVATE -mmmx -msse -msse2 -msse3 -mssse3 -mfpmath=sse)
-    endif()
-	
+if((CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU") AND NOT MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE -DCR_NATIVE_BUILD -flto=auto -fno-exceptions -fno-rtti -fno-threadsafe-statics -pthread)
+
+    if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+            target_compile_options(${PROJECT_NAME} PRIVATE -march=armv8-a+fp+simd)
+        elseif(BUILD_X86)
+            target_compile_options(${PROJECT_NAME} PRIVATE -mmmx -msse -msse2 -msse3 -mfpmath=sse)
+        endif()
+    else ()
+        #target_compile_options(${PROJECT_NAME} PRIVATE -msse -msse2 -msse3 -msimd128 -fPIC)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE CR_DISABLE_SIMD)
+        target_compile_options(${PROJECT_NAME} PRIVATE -fPIC -fvisibility=hidden)
+        target_link_options(${PROJECT_NAME} PRIVATE -sSIDE_MODULE=1 -Oz --closure 1 --minify-wasm-imports)
+        set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".wasm")
+    endif ()
+
     if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
-        target_compile_options(${PROJECT_NAME} PRIVATE -funroll-loops -fomit-frame-pointer -fno-stack-protector -fvisibility=hidden -fvisibility-inlines-hidden)
-    
-        if(NOT WIN32 AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "arm" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^ppc")
-            target_compile_options(${PROJECT_NAME} PRIVATE -fdata-sections -ffunction-sections -fcf-protection=none)
-            target_link_options(${PROJECT_NAME} PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/ext/ldscripts/version.lds -Wl,--gc-sections)
-    
+        target_compile_options(${PROJECT_NAME} PRIVATE -funroll-loops -fomit-frame-pointer -fno-stack-protector -fvisibility=hidden -fvisibility-inlines-hidden -fno-math-errno)
+
+        if(NOT WIN32 AND BUILD_X86)
+            target_compile_options(${PROJECT_NAME} PRIVATE -fdata-sections -ffunction-sections -fcf-protection=none -fno-plt)
+			if(NOT APPLE)
+            	target_link_options(${PROJECT_NAME} PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/ext/ldscripts/version.lds -Wl,--gc-sections)
+			endif()
+
             if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
                 target_compile_options(${PROJECT_NAME} PRIVATE -fgraphite-identity -floop-nest-optimize)
                 target_link_options(${PROJECT_NAME} PRIVATE -fgraphite-identity -floop-nest-optimize)
@@ -105,9 +122,13 @@ if((CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU"
         set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
 
-    if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "^ppc")
-        target_compile_options(${PROJECT_NAME} PRIVATE -fPIC)
-        target_link_options(${PROJECT_NAME} PRIVATE -fPIC)
+    if(VITA)
+        target_compile_options(${PROJECT_NAME} PRIVATE -fno-use-cxa-atexit)
+    else()
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "^ppc")
+            target_compile_options(${PROJECT_NAME} PRIVATE -fPIC)
+            target_link_options(${PROJECT_NAME} PRIVATE -fPIC)
+        endif()
     endif()
 elseif(WIN32 AND MSVC)
     set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -127,7 +148,7 @@ if(WIN32 OR MINGW)
     target_sources(${PROJECT_NAME} PRIVATE "vc/yapb.rc")
 elseif(ANDROID)
     target_link_libraries(${PROJECT_NAME} PRIVATE m dl log)
-else()
+elseif(NOT VITA)
     target_link_libraries(${PROJECT_NAME} PRIVATE m dl pthread)
 endif()
 
@@ -139,6 +160,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 	"ext/crlib"
 	"ext/linkage"
 )
+
+if(COMMAND set_target_postfix)
+    set_target_postfix(${PROJECT_NAME})
+endif()
 
 install(TARGETS ${PROJECT_NAME}
 		DESTINATION "${GAME_DIR}/${SERVER_INSTALL_DIR}/"

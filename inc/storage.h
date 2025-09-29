@@ -11,7 +11,7 @@
 constexpr char kPodbotMagic[8] = { 'P', 'O', 'D', 'W', 'A', 'Y', '!', kNullChar };
 
 constexpr int32_t kStorageMagic = 0x59415042; // storage magic for yapb-data files
-constexpr int32_t kStorageMagicUB = 0x544f4255; //support also the fork format (merged back into yapb)
+constexpr int32_t kStorageMagicUB = 0x544f4255; // support also the fork format (merged back into yapb)
 
 // storage header options
 CR_DECLARE_SCOPED_ENUM (StorageOption,
@@ -40,8 +40,7 @@ CR_DECLARE_SCOPED_ENUM_TYPE (BotFile, uint32_t,
    Practice = 2,
    Graph = 3,
    Pathmatrix = 4,
-   PodbotPWF = 5,
-   EbotEWP = 6
+   PodbotPWF = 5
 )
 
 class BotStorage final : public Singleton <BotStorage> {
@@ -57,6 +56,8 @@ private:
 
 private:
    int m_retries {};
+   ULZ *m_ulz {};
+   bool m_useNonRelativePaths {};
 
 public:
    BotStorage () = default;
@@ -88,16 +89,24 @@ public:
    int32_t storageToBotFile (int32_t options);
 
    // remove all bot related files from disk
-   void unlinkFromDisk ();
+   void unlinkFromDisk (bool onlyTrainingData, bool silenceMessages);
+
+   // is correctly installed and running from correct folder?
+   void checkInstallLocation ();
 
 public:
    // loading the graph may attempt to recurse loading, with converting or download, reset retry counter
    void resetRetries () {
       m_retries = 0;
    }
+
+   // set the compressor instance
+   void setUlzInstance (ULZ *ulz) {
+      m_ulz = ulz;
+   }
 };
 
-#if !defined (BOT_STORAGE_EXPLICIT_INSTANTIATIONS)
+#if !defined(BOT_STORAGE_EXPLICIT_INSTANTIATIONS)
 #  define BOT_STORAGE_EXPLICIT_INSTANTIATIONS
 #  include "../src/storage.cpp"
 #endif

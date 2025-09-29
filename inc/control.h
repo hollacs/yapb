@@ -29,7 +29,7 @@ public:
 public:
    // generic bot command
    struct BotCmd {
-      String name, format, help;
+      String name {}, format {}, help {};
       Handler handler = nullptr;
       bool visible = true;
 
@@ -42,9 +42,9 @@ public:
 
    // single bot menu
    struct BotMenu {
-      int ident, slots;
-      String text;
-      MenuHandler handler;
+      int ident {}, slots {};
+      String text {};
+      MenuHandler handler {};
 
    public:
       explicit BotMenu (int ident, int slots, StringRef text, MenuHandler handler) : ident (ident), slots (slots), text (text), handler (cr::move (handler))
@@ -54,7 +54,7 @@ public:
    // queued text message to prevent overflow with rapid output
    struct PrintQueue {
       int32_t destination {};
-      String text;
+      String text {};
 
    public:
      explicit PrintQueue () = default;
@@ -68,7 +68,7 @@ public:
       float timelimit {};
       float freezetime {};
       float roundtime {};
-   } m_graphSaveVarValues;
+   } m_graphSaveVarValues {};
 
 private:
    StringArray m_args {};
@@ -84,6 +84,7 @@ private:
    bool m_rapidOutput {};
    bool m_isMenuFillCommand {};
    bool m_ignoreTranslate {};
+   bool m_denyCommands {};
 
    int m_menuServerFillTeam {};
    int m_interMenuData[4] = { 0, };
@@ -117,6 +118,7 @@ private:
    int cmdNodeSave ();
    int cmdNodeLoad ();
    int cmdNodeErase ();
+   int cmdNodeEraseTraining ();
    int cmdNodeDelete ();
    int cmdNodeCheck ();
    int cmdNodeCache ();
@@ -156,10 +158,23 @@ private:
    int menuGraphPath (int item);
    int menuCampDirections (int item);
    int menuAutoPathDistance (int item);
-   int menuKickPage1 (int item);
-   int menuKickPage2 (int item);
-   int menuKickPage3 (int item);
-   int menuKickPage4 (int item);
+
+   int menuKickPage1 (int item) {
+      return menuKickPage (1, item);
+   }
+
+   int menuKickPage2 (int item) {
+      return menuKickPage (2, item);
+   }
+
+   int menuKickPage3 (int item) {
+      return menuKickPage (3, item);
+   }
+
+   int menuKickPage4 (int item) {
+      return menuKickPage (4, item);
+   }
+   int menuKickPage (int page, int item);
 
 private:
    void createMenus ();
@@ -184,6 +199,10 @@ public:
 
    void setRapidOutput (bool force) {
       m_rapidOutput = force;
+   }
+
+   void setDenyCommands (bool deny) {
+      m_denyCommands = deny;
    }
 
    void setIssuer (edict_t *ent) {
@@ -226,8 +245,14 @@ public:
    void collectArgs () {
       m_args.clear ();
 
-      for (int i = 0; i < engfuncs.pfnCmd_Argc (); ++i) {
-         m_args.emplace (String (engfuncs.pfnCmd_Argv (i)).lowercase ());
+      for (auto i = 0; i < engfuncs.pfnCmd_Argc (); ++i) {
+         String arg = engfuncs.pfnCmd_Argv (i);
+
+         // only make case-insensetive command itself and first argument
+         if (i < 2) {
+            arg = arg.lowercase ();
+         }
+         m_args.emplace (arg);
       }
    }
 

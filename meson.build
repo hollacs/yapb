@@ -41,6 +41,8 @@ build_type = get_option ('buildtype')
 opt_64bit = get_option('64bit')
 opt_native = get_option('native')
 opt_winxp = get_option('winxp')
+opt_nosimd = get_option('nosimd')
+opt_static_linkent = get_option('static_linkent')
 
 # cpp and ldflags from scratch
 cxxflags = []
@@ -96,10 +98,17 @@ if opt_native
    cxxflags += ['-DCR_NATIVE_BUILD']
 endif
 
+# globally disables all simd optimizations
+if opt_nosimd
+   cxxflags += ['-DCR_DISABLE_SIMD']
+endif
+
 # configure flags gcc and clang
 if cxx == 'clang' or cxx == 'gcc'
    cxxflags += [
-      '-fno-threadsafe-statics', '-pthread'
+      '-pipe',
+      '-fno-threadsafe-statics',
+      '-pthread'
    ]
 
    if not opt_native and cpu != 'arm' and not cpu.startswith('ppc')
@@ -111,34 +120,47 @@ if cxx == 'clang' or cxx == 'gcc'
          '-march=armv8-a+fp+simd', 
       ]
    elif cpu != 'arm' and not cpu.startswith('ppc')
-      cxxflags += [
-         '-mmmx', '-msse', '-msse2', '-msse3', '-mssse3', '-mfpmath=sse'
-      ]
-
+      if not opt_nosimd
+         cxxflags += [
+            '-msse', '-msse2', '-msse3', '-msse3', '-mfpmath=sse'
+         ]
+      endif
+      
       if opt_native
          cxxflags += '-march=native'
-      else
+      elif opt_64bit
          cxxflags += '-march=x86-64'
+      else
+         cxxflags += '-march=i686'
       endif
    endif
+   
+   cxx_version = compiler.version()
 
    # setup optimization flags
    if build_type == 'release'
       cxxflags += [
-         '-funroll-loops', '-fomit-frame-pointer', '-fno-stack-protector', '-fvisibility=hidden', '-fvisibility-inlines-hidden'
+         '-funroll-loops', '-fomit-frame-pointer', '-fno-stack-protector', '-fvisibility=hidden', '-fvisibility-inlines-hidden', '-fno-math-errno'
       ]
 
       if os != 'darwin' and os != 'windows' and cpu != 'aarch64' and cpu != 'arm' and not cpu.startswith('ppc')
-         cxxflags += [
-            '-fdata-sections',
-            '-ffunction-sections',
-            '-fcf-protection=none'
-         ]
+         if not opt_static_linkent
+            cxxflags += [
+               '-fdata-sections',
+               '-ffunction-sections',
+               '-fcf-protection=none',
+               '-fno-plt',
+               '-Wa,--noexecstack'
+            ]
 
-         ldflags += [
-            '-Wl,--version-script=' + meson.project_source_root() + '/ext/ldscripts/version.lds',
-            '-Wl,--gc-sections'
-         ]
+            ldflags += [
+               '-Wl,--version-script=' + meson.project_source_root() + '/ext/ldscripts/version.lds',
+               '-Wl,--gc-sections',
+               '-Wl,-z,noexecstack'
+            ]
+         else
+            cxxflags += ['-DLINKENT_STATIC']
+         endif
       
          if cxx == 'gcc'
             cxxflags += [
@@ -151,17 +173,17 @@ if cxx == 'clang' or cxx == 'gcc'
       endif
 
       # disable lto partitioning on gcc to get symver working 
-      if os != 'darwin' and os != 'windows' and cxx == 'gcc'
+      if os != 'darwin' and os != 'windows' and cxx == 'gcc' and cxx_version.version_compare('<11.0')
          ldflags += [
             '-flto-partition=none'
          ]
       endif
    else
-      cxxflags += ['-g3', '-ggdb', '-DDEBUG', '-D_FORTIFY_SOURCE=2']
+      cxxflags += ['-g3', '-ggdb', '-DDEBUG']
    endif
-   
+
    # special script for mingw-64 builds
-   if os == 'windows' and cxx == 'gcc' and compiler.version().version_compare('<12.0')
+   if os == 'windows' and cxx == 'gcc' and cxx_version.version_compare('<12.0')
       ldflags += [
          '-Xlinker', '--script', '-Xlinker', meson.project_source_root() + '/ext/ldscripts/i386pe.lds'
       ]
@@ -260,6 +282,7 @@ sources = files(
    'src/config.cpp',
    'src/control.cpp',
    'src/engine.cpp',
+   'src/fakeping.cpp',
    'src/graph.cpp',
    'src/hooks.cpp',
    'src/linkage.cpp',
@@ -291,9 +314,18 @@ if os == 'windows' and git.found()
    )
 endif
 
+target_name = meson.project_name()
+
+# xash specific postfix for binaries
+if cpu == 'aarch64'
+    target_name += '_arm64'
+elif opt_64bit
+    target_name += '_amd64'
+endif
+
 # instruct meson we're want our little shared lib bot
 shared_library(
-   meson.project_name(), 
+   target_name, 
    sources,
    include_directories: includes,
    gnu_symbol_visibility: 'hidden',

@@ -115,13 +115,15 @@ public:
    void load ();
    void save ();
 
+private:
+   void syncLoad ();
+
 public:
    template <typename U = int32_t> U getHighestDamageForTeam (int32_t team) const {
       return static_cast <U> (cr::max (1, m_teamHighestDamage[team]));
    }
 
    void setHighestDamageForTeam (int32_t team, int32_t value) {
-      MutexScopedLock lock (m_damageUpdateLock);
       m_teamHighestDamage[team] = value;
    }
 };

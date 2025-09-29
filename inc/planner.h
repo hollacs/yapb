@@ -49,7 +49,7 @@ public:
 };
 
 // bot heuristic functions for astar planner
-class Heuristic final {
+class PlannerHeuristic final {
 public:
    using Func = float (*) (int, int, int);
 
@@ -86,7 +86,7 @@ public:
 // A* algorithm for bots
 class AStarAlgo final : public NonCopyable {
 public:
-   using HeuristicFn = Heuristic::Func;
+   using HeuristicFn = PlannerHeuristic::Func;
 
 public:
    struct Route {
@@ -104,8 +104,8 @@ private:
 
    int m_length {};
 
-   Array <int> m_constructedPath;
-   Array <int> m_smoothedPath;
+   Array <int> m_constructedPath {};
+   Array <int> m_smoothedPath {};
 
 private:
    // clears the currently built route
@@ -151,7 +151,7 @@ public:
 
    // get route max length, route length should not be larger than half of map nodes
    size_t getMaxLength () const {
-      return m_length / 2;
+      return m_length / 2 + kMaxNodes / 256;
    }
 
 public:
@@ -198,7 +198,7 @@ public:
    bool load ();
 
    // flush matrices to disk, so we will not rebuild them on load same map
-   void save ();
+   void save () const;
 
    // do the pathfinding
    bool find (int srcIndex, int destIndex, NodeAdderFn onAddedNode, int *pathDistance = nullptr);
@@ -246,6 +246,7 @@ private:
    UniquePtr <DijkstraAlgo> m_dijkstra {};
    UniquePtr <FloydWarshallAlgo> m_floyd {};
    bool m_memoryLimitHit {};
+   bool m_pathsCheckFailed {};
 
 public:
    PathPlanner ();
@@ -267,6 +268,15 @@ public:
    // get the floyd algo
    decltype (auto) getFloydWarshall () {
       return m_floyd.get ();
+   }
+
+public:
+   bool isPathsCheckFailed () const {
+      return m_pathsCheckFailed;
+   }
+
+   void setPathsCheckFailed (const bool value) {
+      m_pathsCheckFailed = value;
    }
 
 public:

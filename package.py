@@ -81,7 +81,7 @@ class BotSign(object):
       return False
 
 class BotPackage(object):
-   def __init__(self, name: str,  archive: str, artifact: dict, extra: bool = False):
+   def __init__(self, name: str, archive: str, artifact: dict, extra: bool = False):
       self.name = name
       self.archive = archive
       self.artifact = artifact
@@ -133,14 +133,16 @@ class BotRelease(object):
       self.pkg_matrix.append (BotPackage('windows', 'exe', {'windows-x86': 'dll'}))
       self.pkg_matrix.append (BotPackage('linux', 'tar.xz', {'linux-x86': 'so'}))
       self.pkg_matrix.append (BotPackage('extras', 'zip', 
-                                         {'linux-aarch64': 'so', 
+                                         {'linux-arm64': 'so', 
                                           'linux-amd64': 'so', 
                                           'linux-x86-gcc': 'so', 
+                                          'linux-x86-nosimd': 'so', 
                                           'windows-x86-gcc': 'dll', 
                                           'windows-x86-clang': 'dll',
                                           'windows-x86-msvc-xp': 'dll',
                                           'windows-amd64': 'dll', 
-                                          'darwin-x86': 'dylib',
+                                          'apple-x86': 'dylib',
+                                          'apple-arm64': 'dylib',
                                           }, extra=True))
       
    def create_dirs(self):
@@ -214,6 +216,8 @@ class BotRelease(object):
                tif = tarfile.TarInfo(name = zif.filename)
                tif.size = zif.file_size
                tif.mtime =  calendar.timegm(zif.date_time) - timeshift
+               if zif.is_dir():
+                    tif.mode = 0o755  # Set directory permissions (rwxr-xr-x)
                
                tarf.addfile(tarinfo = tif, fileobj = zipf.open(zif.filename))
                
@@ -253,7 +257,14 @@ class BotRelease(object):
       num_artifacts = len(pkg.artifact)
 
       for artifact in pkg.artifact:
-         binary = os.path.join(self.artifacts, artifact, f'{self.project}.{pkg.artifact[artifact]}')
+         binary_name = self.project
+         
+         if artifact.endswith('arm64'):
+            binary_name = binary_name + '_arm64'
+         elif artifact.endswith('amd64'):
+            binary_name = binary_name + '_amd64'
+         
+         binary = os.path.join(self.artifacts, artifact, f'{binary_name}.{pkg.artifact[artifact]}')
          binary_base = os.path.basename(binary)
 
          if not os.path.exists(binary):

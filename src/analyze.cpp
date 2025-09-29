@@ -7,16 +7,20 @@
 
 #include <yapb.h>
 
-ConVar cv_graph_analyze_auto_start ("graph_analyze_auto_start", "1", "Autostart analyzer if all other cases are failed.");
-ConVar cv_graph_analyze_auto_save ("graph_analyze_auto_save", "1", "Auto save results of analysis to graph file. And re-add bots.");
+ConVar cv_graph_analyze_auto_start ("graph_analyze_auto_start", "1", "Autostart analyzer if all other cases fail.");
+ConVar cv_graph_analyze_auto_save ("graph_analyze_auto_save", "1", "Auto save results of analysis to graph file and re-add bots.");
 ConVar cv_graph_analyze_distance ("graph_analyze_distance", "64", "The minimum distance to keep nodes from each other.", true, 42.0f, 128.0f);
-ConVar cv_graph_analyze_max_jump_height ("graph_analyze_max_jump_height", "44", "Max jump height to test if next node will be unreachable.", true, 44.0f, 64.0f);
-ConVar cv_graph_analyze_fps ("graph_analyze_fps", "30.0", "The FPS at which analyzer process is running. This keeps game from freezing during analyzing.", true, 25.0f, 99.0f);
-ConVar cv_graph_analyze_clean_paths_on_finish ("graph_analyze_clean_paths_on_finish", "1", "Specifies if analyzer should clean the unnecessary paths upon finishing.");
-ConVar cv_graph_analyze_optimize_nodes_on_finish ("graph_analyze_optimize_nodes_on_finish", "1", "Specifies if analyzer should merge some near-placed nodes with much of connections together.");
-ConVar cv_graph_analyze_mark_goals_on_finish ("graph_analyze_mark_goals_on_finish", "1", "Specifies if analyzer should mark nodes as map goals automatically upon finish.");
+ConVar cv_graph_analyze_max_jump_height ("graph_analyze_max_jump_height", "44", "Max jump height to test if the next node will be unreachable.", true, 44.0f, 64.0f);
+ConVar cv_graph_analyze_fps ("graph_analyze_fps", "30.0", "The FPS at which the analyzer process is running. This keeps the game from freezing during analysis.", true, 25.0f, 99.0f);
+ConVar cv_graph_analyze_clean_paths_on_finish ("graph_analyze_clean_paths_on_finish", "1", "Specifies if the analyzer should clean unnecessary paths upon finishing.");
+ConVar cv_graph_analyze_optimize_nodes_on_finish ("graph_analyze_optimize_nodes_on_finish", "1", "Specifies if the analyzer should merge some near-placed nodes with many connections together.");
+ConVar cv_graph_analyze_mark_goals_on_finish ("graph_analyze_mark_goals_on_finish", "1", "Specifies if the analyzer should mark nodes as map goals automatically upon finishing.");
 
 void GraphAnalyze::start () {
+   if (m_isAnalyzing) {
+      return;
+   }
+
    // start analyzer in few seconds after level initialized
    if (cv_graph_analyze_auto_start) {
       m_updateInterval = game.time () + 3.0f;
@@ -177,7 +181,7 @@ void GraphAnalyze::optimize () {
    cleanup ();
 
    auto smooth = [] (const Array <int> &nodes) {
-      Vector result;
+      Vector result {};
 
       for (const auto &node : nodes) {
          result += graph[node].origin;
@@ -198,7 +202,7 @@ void GraphAnalyze::optimize () {
          continue;
       }
       const auto &path = graph[i];
-      Array <int> indexes;
+      Array <int> indexes {};
 
       for (const auto &link : path.links) {
          if (graph.exists (link.index) && !m_optimizedNodes[link.index]
@@ -269,7 +273,7 @@ void GraphAnalyze::cleanup () {
    }
 }
 
-void GraphAnalyze::displayOverlayMessage () {
+void GraphAnalyze::displayOverlayMessage () const {
    auto listenserverEdict = game.getLocalEntity ();
 
    if (game.isNullEntity (listenserverEdict) || !m_isAnalyzing) {
@@ -303,11 +307,11 @@ void GraphAnalyze::displayOverlayMessage () {
 void GraphAnalyze::flood (const Vector &pos, const Vector &next, float range) {
    range *= 0.75f;
 
-   TraceResult tr;
+   TraceResult tr {};
    game.testHull (pos, { next.x, next.y, next.z + 19.0f }, TraceIgnore::Monsters, head_hull, nullptr, &tr);
 
    // we're can't reach next point
-   if (!cr::fequal (tr.flFraction, 1.0f) && !util.isShootableBreakable (tr.pHit)) {
+   if (!cr::fequal (tr.flFraction, 1.0f) && !util.isBreakableEntity (tr.pHit)) {
       return;
    }
 
@@ -379,7 +383,6 @@ void GraphAnalyze::markGoals () {
          return EntitySearchResult::Continue;
       });
    };
-
 
    if (game.mapIs (MapFlags::Demolition)) {
       updateNodeFlags (NodeFlag::Goal, "func_bomb_target"); // bombspot zone
